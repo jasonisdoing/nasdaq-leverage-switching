@@ -1,0 +1,18 @@
+{
+    "months_range": 60,
+    "signal_symbol": "QQQM",
+    "trade_symbols": [
+        "QQQM",
+        "QLD",
+        "TQQQ"
+    ],
+    "ma_short": 50,
+    "ma_long": 200,
+    "vol_lookback": 20,
+    "vol_cutoff": 0.35,
+    "drawdown_cutoff": 0.2,
+    "benchmarks": [
+        "VOO",
+        "QQQM"
+    ]
+}
