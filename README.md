@@ -11,7 +11,7 @@ pip install -r requirements.txt
 
 ## 설정 (필수 키)
 - `settings.json`
-  - `signal_symbol`: 시그널 계산 티커(예: QQQ)
+  - `signal_symbol`: 시그널 계산 티커(예: QQQM)
   - `trade_symbols`: 실제 매매 대상 티커 배열(예: QQQM, QLD, TQQQ)
   - `ma_short`, `ma_long`: 이동평균 단기/장기 길이
   - `vol_lookback`: 변동성 계산 기간

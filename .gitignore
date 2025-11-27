@@ -6,3 +6,6 @@ venv/
 
 # 메모 파일
 memo*.txt
+
+# 백테스트 결과
+zresults

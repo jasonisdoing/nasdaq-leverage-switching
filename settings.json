@@ -1,6 +1,6 @@
 {
     "months_range": 60,
-    "signal_symbol": "QQQ",
+    "signal_symbol": "QQQM",
     "trade_symbols": [
         "QQQM",
         "QLD",
