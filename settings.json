@@ -7,12 +7,26 @@
         "TQQQ"
     ],
     "ma_short": 50,
-    "ma_long": 200,
-    "vol_lookback": 20,
-    "vol_cutoff": 0.35,
-    "drawdown_cutoff": 0.2,
+    "ma_long": 120,
+    "vol_lookback": 10,
+    "vol_cutoff": 0.20,
+    "drawdown_cutoff": 0.1,
     "benchmarks": [
-        "VOO",
-        "QQQM"
+        {
+            "ticker": "VOO",
+            "name": "S&P 500"
+        },
+        {
+            "ticker": "QQQM",
+            "name": "Nasdaq 1배"
+        },
+        {
+            "ticker": "QLD",
+            "name": "Nasdaq 2배"
+        },
+        {
+            "ticker": "TQQQ",
+            "name": "Nasdaq 3배"
+        }
     ]
 }
