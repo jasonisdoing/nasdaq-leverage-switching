@@ -11,7 +11,7 @@ import pandas as pd
 import yfinance as yf
 
 from logic.common.settings import load_settings
-from logic.common.data import download_fx, download_prices, _extract_close
+from logic.common.data import compute_bounds, download_fx, download_opens, download_prices, _extract_field
 from logic.backtest.runner import run_backtest
 from utils.report import render_table_eaw
 
@@ -21,13 +21,27 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return "yfratelimiterror" in s or "rate limit" in s
 
 
-def _run_single(args: Tuple[Dict, Dict, pd.DataFrame, pd.Series, pd.DataFrame, pd.Timestamp]) -> Dict:
-    base_settings, overrides, pre_prices, pre_fx, pre_bench, start_bound = args
+def _is_network_or_data_error(exc: Exception) -> bool:
+    s = repr(exc).lower()
+    keywords = [
+        "dnserror",
+        "could not resolve host",
+        "timed out",
+        "operation timed out",
+        "시가 데이터가 비어 있습니다",
+        "가격 데이터를 받아오지 못했습니다",
+    ]
+    return any(k in s for k in keywords)
+
+
+def _run_single(args: Tuple[Dict, Dict, pd.DataFrame, pd.DataFrame, pd.Series, pd.DataFrame, pd.Timestamp]) -> Dict:
+    base_settings, overrides, pre_prices, pre_opens, pre_fx, pre_bench, start_bound = args
     tuned = dict(base_settings)
     tuned.update(overrides)
     report = run_backtest(
         tuned,
         pre_prices=pre_prices,
+        pre_opens=pre_opens,
         pre_fx=pre_fx,
         pre_bench=pre_bench,
         start_bound_override=start_bound,
@@ -50,16 +64,25 @@ def run_tuning(
 ) -> Tuple[List[Dict], Dict]:
     start_ts = datetime.now()
     settings = load_settings(Path("settings.json"))  # 필수 키 없으면 예외
-    end_bound = pd.Timestamp.today().normalize()
-    start_bound = end_bound - pd.DateOffset(months=settings["months_range"])
+    start_bound, warmup_start, end_bound = compute_bounds(settings)
 
     try:
-        pre_prices = download_prices(settings, start_bound)
-        pre_fx = download_fx(start_bound)
-        bench_raw = yf.download(settings["benchmarks"], start=start_bound, auto_adjust=True, progress=False)
+        pre_prices = download_prices(settings, warmup_start)
+        pre_opens = download_opens(settings, warmup_start)
+        pre_fx = download_fx(warmup_start)
+        bench_raw_entries = settings["benchmarks"]
+        bench_tickers = []
+        for b in bench_raw_entries:
+            if isinstance(b, dict):
+                ticker = b.get("ticker")
+            else:
+                ticker = str(b)
+            if ticker:
+                bench_tickers.append(ticker)
+        bench_raw = yf.download(bench_tickers, start=warmup_start, auto_adjust=True, progress=False)
         if bench_raw is None or len(bench_raw) == 0:
             raise ValueError(f"벤치마크 데이터를 받아오지 못했습니다: {settings['benchmarks']}")
-        pre_bench = _extract_close(bench_raw, settings["benchmarks"])
+        pre_bench = _extract_field(bench_raw, "Close", bench_tickers)
     except Exception as exc:
         if _is_rate_limit_error(exc):
             raise SystemExit("yfinance YFRateLimitError: 잠시 후 다시 실행하세요.") from exc
@@ -68,18 +91,14 @@ def run_tuning(
     combos: List[Dict] = []
     for ma_s in tuning_config["ma_short"]:
         for ma_l in tuning_config["ma_long"]:
-            for vol_lb in tuning_config["vol_lookback"]:
-                for vol_cut in tuning_config["vol_cutoff"]:
-                    for dd_cut in tuning_config["drawdown_cutoff"]:
-                        combos.append(
-                            {
-                                "ma_short": int(ma_s),
-                                "ma_long": int(ma_l),
-                                "vol_lookback": int(vol_lb),
-                                "vol_cutoff": float(vol_cut),
-                                "drawdown_cutoff": float(dd_cut),
-                            }
-                        )
+            for dd_cut in tuning_config["drawdown_cutoff"]:
+                combos.append(
+                    {
+                        "ma_short": int(ma_s),
+                        "ma_long": int(ma_l),
+                        "drawdown_cutoff": float(dd_cut),
+                    }
+                )
 
     total_cases = len(combos)
     workers = max_workers or cpu_count() or 1
@@ -89,7 +108,10 @@ def run_tuning(
 
     with ProcessPoolExecutor(max_workers=workers) as ex:
         future_map = {
-            ex.submit(_run_single, (settings, overrides, pre_prices, pre_fx, pre_bench, start_bound)): overrides
+            ex.submit(
+                _run_single,
+                (settings, overrides, pre_prices, pre_opens, pre_fx, pre_bench, start_bound),
+            ): overrides
             for overrides in combos
         }
         for fut in as_completed(future_map):
@@ -98,11 +120,10 @@ def run_tuning(
                 results.append(res)
             except Exception as exc:
                 overrides = future_map[fut]
-                if _is_rate_limit_error(exc):
-                    print("YFRateLimitError 감지: 잠시 후 다시 실행하세요.")
+                if _is_rate_limit_error(exc) or _is_network_or_data_error(exc):
+                    print(f"[튜닝 중단] 네트워크/데이터 오류 감지: {exc}")
                     raise SystemExit(1) from exc
                 print(f"[튜닝 경고] 조합 {overrides} 실패: {exc}")
-                continue
             completed += 1
             progress = int(completed / total_cases * 100)
             if progress_cb and progress >= next_progress:
@@ -116,12 +137,10 @@ def run_tuning(
     return results, {"start_ts": start_ts, "total": total_cases}
 
 
-def render_top_table(results: List[Dict], top_n: int = 20) -> List[str]:
+def render_top_table(results: List[Dict], top_n: int = 100) -> List[str]:
     headers = [
         "ma_short",
         "ma_long",
-        "vol_lookback",
-        "vol_cutoff",
         "drawdown_cutoff",
         "CAGR(%)",
         "MDD(%)",
@@ -136,8 +155,6 @@ def render_top_table(results: List[Dict], top_n: int = 20) -> List[str]:
             [
                 str(p["ma_short"]),
                 str(p["ma_long"]),
-                str(p["vol_lookback"]),
-                f"{p['vol_cutoff']:.2f}",
                 f"{p['drawdown_cutoff']:.2f}",
                 f"{row['cagr']*100:.2f}",
                 f"{row['mdd']*100:.2f}",

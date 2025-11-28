@@ -1,5 +1,6 @@
 """튜닝 실행 엔트리 포인트."""
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
@@ -10,12 +11,11 @@ from logic.tune.runner import render_top_table, run_tuning
 from utils.report import render_table_eaw
 
 # 탐색 범위(필수 키만 명시, 기본값/자동 보정 없음)
+# 최근 결과를 반영해 유효 구간을 좁힌 버전
 TUNING_CONFIG: Dict[str, np.ndarray] = {
-    "ma_short": np.arange(10, 110, 10),
-    "ma_long": np.arange(100, 210, 10),
-    "vol_lookback": np.arange(10, 35, 5),
-    "vol_cutoff": np.arange(0.10, 0.50, 0.05),
-    "drawdown_cutoff": np.arange(0.10, 0.50, 0.05),  # 0.10~0.25
+    "ma_short": np.arange(20, 60, 10),
+    "ma_long": np.arange(100, 150, 10),
+    "drawdown_cutoff": [1, 2, 3, 4, 5],
 }
 
 
@@ -70,13 +70,24 @@ def main() -> None:
 
     # 정렬: CAGR 내림차순
     results.sort(key=lambda x: x["cagr"], reverse=True)
-    top_n = results[:20]
+    top_n = results[:100]
+
+    # 최적 파라미터로 settings.json 업데이트
+    if not results:
+        print("튜닝 결과가 없습니다. settings.json을 변경하지 않습니다.")
+    else:
+        best = results[0]["params"]
+        # 부동소수 표기 방지를 위해 소수점 2자리로 반올림
+        best["drawdown_cutoff"] = round(float(best["drawdown_cutoff"]), 2)
+        best["backtested_date"] = datetime.now().date().isoformat()
+        settings_path = Path("settings.json")
+        with settings_path.open("w", encoding="utf-8") as f:
+            json.dump(best, f, ensure_ascii=False, indent=4)
+        print(f"settings.json을 최적 파라미터로 업데이트했습니다. (backtested_date={best['backtested_date']})")
 
     headers = [
         "ma_short",
         "ma_long",
-        "vol_lookback",
-        "vol_cutoff",
         "drawdown_cutoff",
         "CAGR(%)",
         "MDD(%)",
@@ -91,8 +102,6 @@ def main() -> None:
             [
                 str(p["ma_short"]),
                 str(p["ma_long"]),
-                str(p["vol_lookback"]),
-                f"{p['vol_cutoff']:.2f}",
                 f"{p['drawdown_cutoff']:.2f}",
                 f"{row['cagr']*100:.2f}",
                 f"{row['mdd']*100:.2f}",
@@ -120,7 +129,7 @@ def main() -> None:
         f.write("\n")
 
         f.write("=== 결과 - 정렬 기준: CAGR ===\n")
-        for line in table_lines:
+        for line in table_lines[:200]:
             f.write(line + "\n")
         if len(results) > len(top_n):
             f.write(f"... (총 {total_cases}개 중 상위 {len(top_n)}개 표시)\n")

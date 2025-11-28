@@ -1,23 +1,20 @@
 {
     "months_range": 60,
-    "signal_symbol": "QQQM",
-    "trade_symbols": [
-        "QQQM",
-        "QLD",
-        "TQQQ"
-    ],
-    "ma_short": 50,
+    "signal_ticker": "QQQ",
+    "trade_ticker": "TQQQ",
+    "defense_ticker": "SGOV",
+    "slippage": 0.05,
+    "backtested_date": "2025-11-28",
+    "ma_short": 40,
     "ma_long": 120,
-    "vol_lookback": 10,
-    "vol_cutoff": 0.20,
-    "drawdown_cutoff": 0.1,
+    "drawdown_cutoff": 2.0,
     "benchmarks": [
         {
             "ticker": "VOO",
             "name": "S&P 500"
         },
         {
-            "ticker": "QQQM",
+            "ticker": "QQQ",
             "name": "Nasdaq 1배"
         },
         {

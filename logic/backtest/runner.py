@@ -7,103 +7,188 @@ import pandas as pd
 import yfinance as yf
 
 from config import INITIAL_CAPITAL_KRW
-from logic.common.data import download_fx, download_prices, _extract_close
+from logic.common.data import compute_bounds, download_fx, download_opens, download_prices, _extract_field
+from logic.common.signals import compute_signals, pick_target
 from utils.report import format_kr_money, render_table_eaw
-
-
-def compute_signals(prices: pd.Series, settings: Dict) -> pd.DataFrame:
-    df = pd.DataFrame(index=prices.index)
-    df["close"] = prices
-    df["ma_short"] = prices.rolling(settings["ma_short"]).mean()
-    df["ma_long"] = prices.rolling(settings["ma_long"]).mean()
-    df["vol"] = prices.pct_change().rolling(settings["vol_lookback"]).std() * np.sqrt(252)
-    peak = prices.cummax()
-    df["drawdown"] = prices / peak - 1.0
-    return df.dropna()
-
-
-def pick_target(row, settings: Dict) -> str:
-    if row["drawdown"] <= -settings["drawdown_cutoff"]:
-        return "QQQM"
-    if row["ma_short"] > row["ma_long"] and row["vol"] < settings["vol_cutoff"]:
-        return "TQQQ"
-    if row["ma_short"] > row["ma_long"]:
-        return "QLD"
-    return "QQQM"
 
 
 def run_backtest(
     settings: Dict,
     *,
     pre_prices: pd.DataFrame | None = None,
+    pre_opens: pd.DataFrame | None = None,
     pre_fx: pd.Series | None = None,
     pre_bench: pd.DataFrame | None = None,
     start_bound_override: pd.Timestamp | None = None,
 ) -> Dict[str, object]:
-    end_bound = pd.Timestamp.today().normalize()
-    start_bound = start_bound_override or end_bound - pd.DateOffset(months=settings["months_range"])
+    start_bound_base, warmup_start, end_bound = compute_bounds(settings)
+    start_bound = start_bound_override or start_bound_base
 
-    prices = pre_prices.copy() if pre_prices is not None else download_prices(settings, start_bound)
-    signal_df = compute_signals(prices[settings["signal_symbol"]], settings)
-    common_index = signal_df.index.intersection(prices.index)
-    prices = prices.loc[common_index]
-    signal_df = signal_df.loc[common_index]
+    prices_full = pre_prices.copy() if pre_prices is not None else download_prices(settings, warmup_start)
+    opens_full = pre_opens.copy() if pre_opens is not None else download_opens(settings, warmup_start)
 
-    returns = prices[settings["trade_symbols"]].pct_change().dropna()
-    if returns.empty:
+    offense = settings["trade_ticker"]
+    defense = settings["defense_ticker"]
+    assets = [offense]
+    if defense != "CASH":
+        assets.append(defense)
+
+    signal_df_full = compute_signals(prices_full[settings["signal_ticker"]], settings)
+    returns_full = opens_full[assets].pct_change()
+
+    common_index = signal_df_full.index.intersection(prices_full.index).intersection(opens_full.index).intersection(returns_full.index)
+    common_index = common_index[common_index >= start_bound]
+
+    prices = prices_full.loc[common_index]
+    opens = opens_full.loc[common_index]
+    signal_df = signal_df_full.loc[common_index]
+    returns = returns_full.loc[common_index]
+    if returns.dropna().empty:
         raise ValueError("수익률 데이터가 비어 있습니다. 가격/기간 설정을 확인하세요.")
-    signal_df = signal_df.loc[returns.index]
     signal_df["target"] = signal_df.apply(lambda row: pick_target(row, settings), axis=1)
 
     # 환율 데이터(원/달러)
     fx = pre_fx.copy() if pre_fx is not None else download_fx(start_bound)
-    fx = fx.reindex(returns.index, method="ffill").dropna()
+    fx = fx.reindex(common_index, method="ffill").dropna()
 
     # 초기 자본: 원화 -> 달러
-    first_date = returns.index[0]
+    first_date = common_index[0]
     init_fx = fx.loc[first_date]
-    initial_capital_usd = INITIAL_CAPITAL_KRW / init_fx
-    capital_usd = initial_capital_usd
+    cash_usd = INITIAL_CAPITAL_KRW / init_fx
+    initial_capital_usd = cash_usd
+    qty = {s: 0 for s in assets}
+    prev_value = cash_usd
 
     equity = []
     daily_rets = []
     daily_log: List[str] = []
-    hold_days = {s: 0 for s in settings["trade_symbols"]}
-    asset_pnl = {s: 0.0 for s in settings["trade_symbols"]}
-    asset_exposure_days = {s: 0 for s in settings["trade_symbols"]}
-    trade_counts = {s: 0 for s in settings["trade_symbols"]}
-    win_days = {s: 0 for s in settings["trade_symbols"]}
-    trade_days = {s: 0 for s in settings["trade_symbols"]}
+    segment_lines: List[str] = []
+    seg_target = None
+    seg_start_date = None
+    seg_start_value = None
+    seg_days = 0
+    seg_qty = 0
+    last_total_value = prev_value
+
+    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
+
+    def _fmt_date(dt: pd.Timestamp) -> str:
+        return f"{dt.date()}({weekday_map[dt.weekday()]})"
+
+    def _add_segment(start_dt, end_dt, days, tgt, qty_val, pnl_val, pct_val):
+        if start_dt is None or end_dt is None or tgt is None:
+            return
+        segment_lines.append(
+            f"[{_fmt_date(start_dt)} ~ {_fmt_date(end_dt)}] {tgt}: {days} 거래일"
+        )
+        if tgt != "CASH":
+            segment_lines.append(f" - 보유수량: {qty_val:,}")
+            segment_lines.append(f" - 손익: ${pnl_val:,.2f}")
+            segment_lines.append(f" - 손익(%): {pct_val*100:+.2f}%")
+    hold_days = {s: 0 for s in assets}
+    asset_pnl = {s: 0.0 for s in assets}
+    prev_pos_value = {s: 0.0 for s in assets}
+    asset_exposure_days = {s: 0 for s in assets}
+    trade_counts = {s: 0 for s in assets}
+    win_days = {s: 0 for s in assets}
+    trade_days = {s: 0 for s in assets}
     prev_target = None
+    slip_raw = settings["slippage"]
+    slip = slip_raw / 100 if slip_raw > 1 else slip_raw / 100
+    buy_slip = slip
+    sell_slip = slip
 
-    for date, row in returns.iterrows():
+    for date in common_index:
+        start_value_today = last_total_value
         target = signal_df.at[date, "target"]
-        daily_ret = row[target]
+        trade_cf = {s: 0.0 for s in assets}  # 자산별 현금흐름(매수+: 자금투입, 매도-: 인출)
 
-        capital_before = capital_usd
-        pnl = capital_before * daily_ret
-        capital_usd *= 1 + daily_ret
+        # 세그먼트 전환 처리(전일 종료값 기준)
+        if seg_target is None:
+            seg_target = target
+            seg_start_date = date
+            seg_start_value = start_value_today
+            seg_days = 0
+            seg_qty = qty[target] if target != "CASH" else 0
+        elif target != seg_target:
+            end_value = start_value_today
+            pnl_seg = end_value - seg_start_value
+            pct_seg = (end_value / seg_start_value - 1) if seg_start_value != 0 else 0.0
+            _add_segment(
+                seg_start_date,
+                date - pd.Timedelta(days=1),
+                seg_days,
+                seg_target,
+                seg_qty,
+                pnl_seg,
+                pct_seg,
+            )
+            seg_target = target
+            seg_start_date = date
+            seg_start_value = start_value_today
+            seg_days = 0
+            seg_qty = qty[target] if target != "CASH" else 0
 
-        equity.append(capital_usd)
+        # 오늘 시초가
+        prices_today = {s: opens.at[date, s] for s in assets}
+
+        # 포지션 변경 시 청산
+        if prev_target and prev_target != target and prev_target != "CASH":
+            sell_price = prices_today[prev_target] * (1 - sell_slip)
+            cash_usd += qty[prev_target] * sell_price
+            trade_cf[prev_target] -= qty[prev_target] * sell_price
+            qty[prev_target] = 0
+
+        # 매수
+        if target != "CASH":
+            buy_price = prices_today[target] * (1 + buy_slip)
+            purch_qty = int(cash_usd / buy_price)
+            if purch_qty > 0 and (prev_target != target):
+                cash_usd -= purch_qty * buy_price
+                trade_cf[target] += purch_qty * buy_price
+                qty[target] += purch_qty
+
+        # 평가
+        position_value = {s: qty[s] * prices_today[s] for s in assets}
+        total_value = cash_usd + sum(position_value.values())
+        daily_ret = (total_value - prev_value) / prev_value if prev_value != 0 else 0.0
+        pnl = total_value - prev_value
+        prev_value = total_value
+
+        equity.append(total_value)
         daily_rets.append(daily_ret)
+        seg_days += 1
+        seg_qty = qty[target] if target != "CASH" else 0
+        last_total_value = total_value
 
         # 보유일/노출일 및 티커별 기여도
-        for sym in settings["trade_symbols"]:
-            if sym == target:
+        for sym in assets:
+            # 포지션 가치 증감에서 거래 현금흐름을 제외해 가격 변동만 귀속
+            delta = (position_value[sym] - prev_pos_value[sym]) - trade_cf[sym]
+            asset_pnl[sym] += delta
+            prev_pos_value[sym] = position_value[sym]
+
+            if sym == target and qty[sym] > 0:
                 hold_days[sym] += 1
                 asset_exposure_days[sym] += 1
-                asset_pnl[sym] += pnl
                 trade_days[sym] += 1
-                if row[sym] > 0:
+                if daily_ret > 0:
                     win_days[sym] += 1
                 if prev_target != sym:
                     trade_counts[sym] += 1
             else:
                 hold_days[sym] = 0
 
-        weights = {s: (1.0 if s == target else 0.0) for s in settings["trade_symbols"]}
-        cash_value = 0.0
-        total_value = capital_usd + cash_value
+        if target == "CASH":
+            weights = {s: 0.0 for s in assets}
+            cash_value = cash_usd
+            total_value = cash_usd
+        else:
+            position_value = {s: qty[s] * prices_today[s] for s in assets}
+            total_pos = sum(position_value.values())
+            total_value = cash_usd + total_pos
+            weights = {s: (position_value[s] / total_value if total_value > 0 else 0.0) for s in assets}
+            cash_value = cash_usd
         fx_today = fx.loc[date]
         krw_value = total_value * fx_today
 
@@ -163,12 +248,13 @@ def run_backtest(
         )
 
         # 자산 행들
-        for idx, sym in enumerate(settings["trade_symbols"], start=2):
-            price = prices.at[date, sym]
-            ret = row[sym]
+        row_idx = 2
+        for sym in assets:
+            price = prices_today[sym]
+            ret = returns.at[date, sym] if sym in returns.columns else 0.0
             weight = weights[sym]
-            position_value = total_value * weight
-            qty = position_value / price if price > 0 else 0.0
+            position_value = qty[sym] * price
+            qty_disp = qty[sym]
 
             if sym == target and prev_target != sym:
                 state = "BUY"
@@ -188,13 +274,13 @@ def run_backtest(
 
             rows.append(
                 [
-                    str(idx),
+                    str(row_idx),
                     sym,
                     state,
                     str(hold_days[sym]),
                     f"{price:,.2f}",
                     f"{ret:+.2%}",
-                    f"{qty:,.4f}",
+                    f"{qty_disp:,.0f}",
                     f"{position_value:,.2f}",
                     f"{eval_pnl:,.2f}",
                     f"{eval_pct*100:+.2f}%",
@@ -204,6 +290,7 @@ def run_backtest(
                     "타깃" if sym == target else "",
                 ]
             )
+            row_idx += 1
 
         table_lines = render_table_eaw(headers, rows, aligns)
 
@@ -223,24 +310,23 @@ def run_backtest(
     equity_series = pd.Series(equity, index=returns.index)
     daily_rets_series = pd.Series(daily_rets, index=returns.index)
 
-    cagr = (
-        (equity_series.iloc[-1] / initial_capital_usd) ** (252 / len(equity_series))
-        - 1
-    )
+    # KRW 기준 성과(초기/최종 자산도 KRW로 표기하므로 일관)
+    krw_series = equity_series * fx.loc[equity_series.index]
+    cagr = (krw_series.iloc[-1] / INITIAL_CAPITAL_KRW) ** (252 / len(krw_series)) - 1
     vol = daily_rets_series.std() * np.sqrt(252)
     sharpe = cagr / vol if vol != 0 else np.nan
-    running_max = equity_series.cummax()
-    drawdown = equity_series / running_max - 1
+    running_max = krw_series.cummax()
+    drawdown = krw_series / running_max - 1
     max_dd = drawdown.min()
     win_rate = (daily_rets_series > 0).mean()
     last_fx = fx.iloc[-1]
-    final_krw = equity_series.iloc[-1] * last_fx
-    period_return = equity_series.iloc[-1] / initial_capital_usd - 1
+    final_krw = krw_series.iloc[-1]
+    period_return = krw_series.iloc[-1] / INITIAL_CAPITAL_KRW - 1
     start_date = equity_series.index[0].date()
     end_date = equity_series.index[-1].date()
-    total_pnl = equity_series.iloc[-1] - initial_capital_usd
+    total_pnl = krw_series.iloc[-1] - INITIAL_CAPITAL_KRW
 
-    # 벤치마크(VOO, QQQM)의 기간 수익률 및 CAGR
+    # 벤치마크(VOO, QQQ)의 기간 수익률 및 CAGR
     bench_raw_entries = settings["benchmarks"]
     bench_info: List[Dict[str, str]] = []
     for b in bench_raw_entries:
@@ -261,7 +347,7 @@ def run_backtest(
             bench_prices = pre_bench.copy()
         else:
             bench_raw = yf.download(bench_tickers, start=start_bound, auto_adjust=True, progress=False)
-            bench_prices = _extract_close(bench_raw, bench_tickers)
+            bench_prices = _extract_field(bench_raw, "Close", bench_tickers)
         bench_prices = bench_prices.reindex(equity_series.index, method="ffill")
         for b in bench_info:
             t = b["ticker"]
@@ -353,20 +439,35 @@ def run_backtest(
         ["center", "left", "right", "right", "right"],
     )
 
+    # 마지막 세그먼트 닫기
+    if seg_target is not None and seg_start_date is not None:
+        end_value = equity_series.iloc[-1]
+        pnl_seg = end_value - seg_start_value
+        pct_seg = (end_value / seg_start_value - 1) if seg_start_value != 0 else 0.0
+        _add_segment(
+            seg_start_date,
+            common_index[-1],
+            seg_days,
+            seg_target,
+            seg_qty,
+            pnl_seg,
+            pct_seg,
+        )
+
     # 종목별 성과 요약
     asset_rows = []
-    for idx, sym in enumerate(["CASH"] + settings["trade_symbols"], start=1):
+    for idx, sym in enumerate(["CASH"] + assets, start=1):
         if sym == "CASH":
             pnl_usd = 0.0
             days = 0
             trades = 0
             win_rate_sym = 0.0
         else:
-            pnl_usd = asset_pnl[sym]
-            days = asset_exposure_days[sym]
-            trades = trade_counts[sym]
-            w_days = win_days[sym]
-            t_days = trade_days[sym]
+            pnl_usd = asset_pnl.get(sym, 0.0)
+            days = asset_exposure_days.get(sym, 0)
+            trades = trade_counts.get(sym, 0)
+            w_days = win_days.get(sym, 0)
+            t_days = trade_days.get(sym, 0)
             win_rate_sym = w_days / t_days * 100 if t_days > 0 else 0.0
         krw_pnl = pnl_usd * last_fx
         asset_rows.append(
@@ -400,6 +501,75 @@ def run_backtest(
     asset_summary_lines = ["7. ========= 종목별 성과 요약 =========="]
     asset_summary_lines.extend(render_table_eaw(asset_headers, asset_rows, asset_aligns))
 
+    # 주별/월별 성과 요약
+    weekly_lines: List[str] = ["5. ========= 주별 성과 요약 =========="]
+    try:
+        weekly = krw_series.resample("W-FRI").last().dropna()
+        weekly_ret = weekly.pct_change().fillna(0)
+        base_krw = INITIAL_CAPITAL_KRW
+        weekly_cum = weekly / base_krw - 1
+        w_rows = []
+        for d, val in weekly.items():
+            w_rows.append(
+                [
+                    d.date().isoformat(),
+                    f"{format_kr_money(val)}",
+                    f"{weekly_ret.loc[d]*100:+.2f}%",
+                    f"{weekly_cum.loc[d]*100:+.2f}%",
+                ]
+            )
+        weekly_lines.extend(
+            render_table_eaw(
+                ["주차(종료일)", "평가금액", "주간 수익률", "누적 수익률"],
+                w_rows,
+                ["center", "right", "right", "right"],
+            )
+        )
+    except Exception:
+        weekly_lines.append("| 주간 요약 생성 실패")
+
+    monthly_lines: List[str] = ["6. ========= 월별 성과 요약 =========="]
+    try:
+        # 'M'는 pandas에서 deprecated 예정 → 'ME'(month end)로 변경
+        monthly = krw_series.resample("ME").last().dropna()
+        monthly_ret = monthly.pct_change().fillna(0)
+        base = INITIAL_CAPITAL_KRW
+        years = sorted({d.year for d in monthly.index})
+        headers = ["연도"] + [f"{m}월" for m in range(1, 13)] + ["연간"]
+        rows = []
+        for yr in years:
+            monthly_vals = []
+            year_vals = monthly[monthly.index.year == yr]
+            year_ret = None
+            for m in range(1, 13):
+                dts = year_vals[year_vals.index.month == m].index
+                if len(dts) == 0:
+                    monthly_vals.append("  -    ")
+                    continue
+                dt = dts[0]
+                r = monthly_ret.loc[dt]
+                monthly_vals.append(f"{r*100:+.2f}%")
+            if len(year_vals) > 0:
+                year_ret = year_vals.iloc[-1] / year_vals.iloc[0] - 1
+            rows.append([str(yr)] + monthly_vals + [f"{year_ret*100:+.2f}%" if year_ret is not None else "  -    "])
+
+        monthly_lines.extend(render_table_eaw(headers, rows, ["center"] + ["right"] * 13 + ["right"]))
+    except Exception:
+        monthly_lines.append("| 월간 요약 생성 실패")
+
+    used_settings_lines = [
+        "3. ========= 사용된 설정값 ==========",
+        f"| 테스트 기간: 최근 {settings['months_range']}개월 (실제 {months}개월)",
+        f"| 초기 자본: {format_kr_money(INITIAL_CAPITAL_KRW)}",
+        f"| ma_short: {settings['ma_short']}",
+        f"| ma_long: {settings['ma_long']}",
+        f"| drawdown_cutoff: {settings['drawdown_cutoff']}%",
+        f"| signal_ticker: {settings['signal_ticker']}",
+        f"| trade_ticker: {settings['trade_ticker']}",
+        f"| defense_ticker: {settings['defense_ticker']}",
+        f"| slippage: {settings['slippage']}%",
+    ]
+
     return {
         "start": start_date.isoformat(),
         "end": end_date.isoformat(),
@@ -416,5 +586,9 @@ def run_backtest(
         "bench_summary_lines": bench_summary_lines,
         "bench_table_lines": bench_table_lines,
         "asset_summary_lines": asset_summary_lines,
+        "weekly_summary_lines": weekly_lines,
+        "monthly_summary_lines": monthly_lines,
         "bench_error": bench_error,
+        "used_settings_lines": used_settings_lines,
+        "segment_lines": segment_lines,
     }
