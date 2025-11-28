@@ -7,7 +7,7 @@ import pandas as pd
 import yfinance as yf
 
 from config import BACKTEST_SLIPPAGE, INITIAL_CAPITAL_KRW
-from logic.common.data import download_fx, download_opens, download_prices, _extract_field
+from logic.common.data import compute_bounds, download_fx, download_opens, download_prices, _extract_field
 from logic.common.signals import compute_signals, pick_target
 from utils.report import format_kr_money, render_table_eaw
 
@@ -21,22 +21,22 @@ def run_backtest(
     pre_bench: pd.DataFrame | None = None,
     start_bound_override: pd.Timestamp | None = None,
 ) -> Dict[str, object]:
-    end_bound = pd.Timestamp.today().normalize()
-    start_bound = start_bound_override or end_bound - pd.DateOffset(months=settings["months_range"])
+    start_bound_base, warmup_start, end_bound = compute_bounds(settings)
+    start_bound = start_bound_override or start_bound_base
 
-    prices = pre_prices.copy() if pre_prices is not None else download_prices(settings, start_bound)
-    opens = pre_opens.copy() if pre_opens is not None else download_opens(settings, start_bound)
-    signal_df = compute_signals(prices[settings["signal_symbol"]], settings)
-    common_index = signal_df.index.intersection(prices.index).intersection(opens.index)
-    prices = prices.loc[common_index]
-    opens = opens.loc[common_index]
-    signal_df = signal_df.loc[common_index]
+    prices_full = pre_prices.copy() if pre_prices is not None else download_prices(settings, warmup_start)
+    opens_full = pre_opens.copy() if pre_opens is not None else download_opens(settings, warmup_start)
 
-    # 수익률 데이터를 시초가 기준으로 정렬
-    returns = opens[settings["trade_symbols"]].pct_change()
-    common_index = signal_df.index.intersection(returns.index)
-    signal_df = signal_df.loc[common_index]
-    returns = returns.loc[common_index]
+    signal_df_full = compute_signals(prices_full[settings["signal_symbol"]], settings)
+    returns_full = opens_full[settings["trade_symbols"]].pct_change()
+
+    common_index = signal_df_full.index.intersection(prices_full.index).intersection(opens_full.index).intersection(returns_full.index)
+    common_index = common_index[common_index >= start_bound]
+
+    prices = prices_full.loc[common_index]
+    opens = opens_full.loc[common_index]
+    signal_df = signal_df_full.loc[common_index]
+    returns = returns_full.loc[common_index]
     if returns.dropna().empty:
         raise ValueError("수익률 데이터가 비어 있습니다. 가격/기간 설정을 확인하세요.")
     signal_df["target"] = signal_df.apply(lambda row: pick_target(row, settings), axis=1)
@@ -56,6 +56,29 @@ def run_backtest(
     equity = []
     daily_rets = []
     daily_log: List[str] = []
+    segment_lines: List[str] = []
+    seg_target = None
+    seg_start_date = None
+    seg_start_value = None
+    seg_days = 0
+    seg_qty = 0
+    last_total_value = prev_value
+
+    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
+
+    def _fmt_date(dt: pd.Timestamp) -> str:
+        return f"{dt.date()}({weekday_map[dt.weekday()]})"
+
+    def _add_segment(start_dt, end_dt, days, tgt, qty_val, pnl_val, pct_val):
+        if start_dt is None or end_dt is None or tgt is None:
+            return
+        segment_lines.append(
+            f"[{_fmt_date(start_dt)} ~ {_fmt_date(end_dt)}] {tgt}: {days} 거래일"
+        )
+        if tgt != "CASH":
+            segment_lines.append(f" - 보유수량: {qty_val:,}")
+            segment_lines.append(f" - 손익: ${pnl_val:,.2f}")
+            segment_lines.append(f" - 손익(%): {pct_val*100:+.2f}%")
     hold_days = {s: 0 for s in settings["trade_symbols"]}
     asset_pnl = {s: 0.0 for s in settings["trade_symbols"]}
     asset_exposure_days = {s: 0 for s in settings["trade_symbols"]}
@@ -67,7 +90,34 @@ def run_backtest(
     sell_slip = BACKTEST_SLIPPAGE.get("sell_pct", 0) / 100
 
     for date in common_index:
+        start_value_today = last_total_value
         target = signal_df.at[date, "target"]
+
+        # 세그먼트 전환 처리(전일 종료값 기준)
+        if seg_target is None:
+            seg_target = target
+            seg_start_date = date
+            seg_start_value = start_value_today
+            seg_days = 0
+            seg_qty = qty[target] if target != "CASH" else 0
+        elif target != seg_target:
+            end_value = start_value_today
+            pnl_seg = end_value - seg_start_value
+            pct_seg = (end_value / seg_start_value - 1) if seg_start_value != 0 else 0.0
+            _add_segment(
+                seg_start_date,
+                date - pd.Timedelta(days=1),
+                seg_days,
+                seg_target,
+                seg_qty,
+                pnl_seg,
+                pct_seg,
+            )
+            seg_target = target
+            seg_start_date = date
+            seg_start_value = start_value_today
+            seg_days = 0
+            seg_qty = qty[target] if target != "CASH" else 0
 
         # 오늘 시초가
         prices_today = {s: opens.at[date, s] for s in settings["trade_symbols"]}
@@ -94,6 +144,9 @@ def run_backtest(
 
         equity.append(total_value)
         daily_rets.append(daily_ret)
+        seg_days += 1
+        seg_qty = qty[target] if target != "CASH" else 0
+        last_total_value = total_value
 
         # 보유일/노출일 및 티커별 기여도
         for sym in settings["trade_symbols"]:
@@ -238,24 +291,23 @@ def run_backtest(
     equity_series = pd.Series(equity, index=returns.index)
     daily_rets_series = pd.Series(daily_rets, index=returns.index)
 
-    cagr = (
-        (equity_series.iloc[-1] / initial_capital_usd) ** (252 / len(equity_series))
-        - 1
-    )
+    # KRW 기준 성과(초기/최종 자산도 KRW로 표기하므로 일관)
+    krw_series = equity_series * fx.loc[equity_series.index]
+    cagr = (krw_series.iloc[-1] / INITIAL_CAPITAL_KRW) ** (252 / len(krw_series)) - 1
     vol = daily_rets_series.std() * np.sqrt(252)
     sharpe = cagr / vol if vol != 0 else np.nan
-    running_max = equity_series.cummax()
-    drawdown = equity_series / running_max - 1
+    running_max = krw_series.cummax()
+    drawdown = krw_series / running_max - 1
     max_dd = drawdown.min()
     win_rate = (daily_rets_series > 0).mean()
     last_fx = fx.iloc[-1]
-    final_krw = equity_series.iloc[-1] * last_fx
-    period_return = equity_series.iloc[-1] / initial_capital_usd - 1
+    final_krw = krw_series.iloc[-1]
+    period_return = krw_series.iloc[-1] / INITIAL_CAPITAL_KRW - 1
     start_date = equity_series.index[0].date()
     end_date = equity_series.index[-1].date()
-    total_pnl = equity_series.iloc[-1] - initial_capital_usd
+    total_pnl = krw_series.iloc[-1] - INITIAL_CAPITAL_KRW
 
-    # 벤치마크(VOO, QQQM)의 기간 수익률 및 CAGR
+    # 벤치마크(VOO, QQQ)의 기간 수익률 및 CAGR
     bench_raw_entries = settings["benchmarks"]
     bench_info: List[Dict[str, str]] = []
     for b in bench_raw_entries:
@@ -368,6 +420,21 @@ def run_backtest(
         ["center", "left", "right", "right", "right"],
     )
 
+    # 마지막 세그먼트 닫기
+    if seg_target is not None and seg_start_date is not None:
+        end_value = equity_series.iloc[-1]
+        pnl_seg = end_value - seg_start_value
+        pct_seg = (end_value / seg_start_value - 1) if seg_start_value != 0 else 0.0
+        _add_segment(
+            seg_start_date,
+            common_index[-1],
+            seg_days,
+            seg_target,
+            seg_qty,
+            pnl_seg,
+            pct_seg,
+        )
+
     # 종목별 성과 요약
     asset_rows = []
     for idx, sym in enumerate(["CASH"] + settings["trade_symbols"], start=1):
@@ -415,6 +482,62 @@ def run_backtest(
     asset_summary_lines = ["7. ========= 종목별 성과 요약 =========="]
     asset_summary_lines.extend(render_table_eaw(asset_headers, asset_rows, asset_aligns))
 
+    # 주별/월별 성과 요약
+    weekly_lines: List[str] = ["5. ========= 주별 성과 요약 =========="]
+    try:
+        weekly = krw_series.resample("W-FRI").last().dropna()
+        weekly_ret = weekly.pct_change().fillna(0)
+        base_krw = INITIAL_CAPITAL_KRW
+        weekly_cum = weekly / base_krw - 1
+        w_rows = []
+        for d, val in weekly.items():
+            w_rows.append(
+                [
+                    d.date().isoformat(),
+                    f"{format_kr_money(val)}",
+                    f"{weekly_ret.loc[d]*100:+.2f}%",
+                    f"{weekly_cum.loc[d]*100:+.2f}%",
+                ]
+            )
+        weekly_lines.extend(
+            render_table_eaw(
+                ["주차(종료일)", "평가금액", "주간 수익률", "누적 수익률"],
+                w_rows,
+                ["center", "right", "right", "right"],
+            )
+        )
+    except Exception:
+        weekly_lines.append("| 주간 요약 생성 실패")
+
+    monthly_lines: List[str] = ["6. ========= 월별 성과 요약 =========="]
+    try:
+        # 'M'는 pandas에서 deprecated 예정 → 'ME'(month end)로 변경
+        monthly = krw_series.resample("ME").last().dropna()
+        monthly_ret = monthly.pct_change().fillna(0)
+        base = INITIAL_CAPITAL_KRW
+        years = sorted({d.year for d in monthly.index})
+        headers = ["연도"] + [f"{m}월" for m in range(1, 13)] + ["연간"]
+        rows = []
+        for yr in years:
+            monthly_vals = []
+            year_vals = monthly[monthly.index.year == yr]
+            year_ret = None
+            for m in range(1, 13):
+                dts = year_vals[year_vals.index.month == m].index
+                if len(dts) == 0:
+                    monthly_vals.append("  -    ")
+                    continue
+                dt = dts[0]
+                r = monthly_ret.loc[dt]
+                monthly_vals.append(f"{r*100:+.2f}%")
+            if len(year_vals) > 0:
+                year_ret = year_vals.iloc[-1] / year_vals.iloc[0] - 1
+            rows.append([str(yr)] + monthly_vals + [f"{year_ret*100:+.2f}%" if year_ret is not None else "  -    "])
+
+        monthly_lines.extend(render_table_eaw(headers, rows, ["center"] + ["right"] * 13 + ["right"]))
+    except Exception:
+        monthly_lines.append("| 월간 요약 생성 실패")
+
     used_settings_lines = [
         "3. ========= 사용된 설정값 ==========",
         f"| 테스트 기간: 최근 {settings['months_range']}개월 (실제 {months}개월)",
@@ -441,6 +564,9 @@ def run_backtest(
         "bench_summary_lines": bench_summary_lines,
         "bench_table_lines": bench_table_lines,
         "asset_summary_lines": asset_summary_lines,
+        "weekly_summary_lines": weekly_lines,
+        "monthly_summary_lines": monthly_lines,
         "bench_error": bench_error,
         "used_settings_lines": used_settings_lines,
+        "segment_lines": segment_lines,
     }

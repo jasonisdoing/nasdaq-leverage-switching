@@ -29,20 +29,31 @@ def main() -> None:
             f"종료일: {report['end']}\n\n"
         )
         f.write("2. ========= 일자별 성과 ==========\n\n")
+        if report.get("segment_lines"):
+            f.write("=== 구간별 보유 요약 ===\n")
+            for line in report["segment_lines"]:
+                f.write(line + "\n")
+            f.write("\n=== 일자별 상세 ===\n")
         for line in report["daily_log"]:
-            f.write(line + "\n")
-        f.write("\n")
-        for line in report["asset_summary_lines"]:
             f.write(line + "\n")
         f.write("\n")
         for line in report.get("used_settings_lines", []):
             f.write(line + "\n")
         f.write("\n")
-        for line in report["summary_lines"]:
+        if report.get("weekly_summary_lines"):
+            for line in report["weekly_summary_lines"]:
+                f.write(line + "\n")
+            f.write("\n")
+        if report.get("monthly_summary_lines"):
+            for line in report["monthly_summary_lines"]:
+                f.write(line + "\n")
+            f.write("\n")
+        for line in report["asset_summary_lines"]:
             f.write(line + "\n")
         f.write("\n")
+        for line in report["summary_lines"]:
+            f.write(line + "\n")
         if report.get("bench_table_lines"):
-            f.write("벤치마크/전략 기간 수익률 비교\n")
             for line in report["bench_table_lines"]:
                 f.write(line + "\n")
 
@@ -58,7 +69,6 @@ def main() -> None:
     # 요약 섹션 콘솔 출력
     print("\n".join(report["summary_lines"]))
     if report.get("bench_table_lines"):
-        print("벤치마크/전략 기간 수익률 비교")
         for line in report["bench_table_lines"]:
             print(line)
 

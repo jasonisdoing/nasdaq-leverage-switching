@@ -8,16 +8,18 @@ import numpy as np
 import pandas as pd
 
 from logic.common.signals import compute_signals, pick_target
-from logic.common.data import download_prices
+from logic.common.data import compute_bounds, download_prices
 from utils.report import render_table_eaw
 
 
 def run_recommend(settings: Dict) -> Dict[str, object]:
-    end_bound = pd.Timestamp.today().normalize()
-    start_bound = end_bound - pd.DateOffset(months=settings["months_range"])
+    start_bound, warmup_start, end_bound = compute_bounds(settings)
 
-    prices = download_prices(settings, start_bound)
-    signal_df = compute_signals(prices[settings["signal_symbol"]], settings)
+    prices_full = download_prices(settings, warmup_start)
+    signal_df_full = compute_signals(prices_full[settings["signal_symbol"]], settings)
+    valid_index = prices_full.index[prices_full.index >= start_bound]
+    prices = prices_full.loc[valid_index]
+    signal_df = signal_df_full.loc[valid_index]
     if signal_df.empty:
         raise ValueError("시그널 계산에 필요한 데이터가 없습니다.")
     last_date = signal_df.index.max()

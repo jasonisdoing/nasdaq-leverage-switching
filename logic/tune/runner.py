@@ -11,7 +11,7 @@ import pandas as pd
 import yfinance as yf
 
 from logic.common.settings import load_settings
-from logic.common.data import download_fx, download_opens, download_prices, _extract_field
+from logic.common.data import compute_bounds, download_fx, download_opens, download_prices, _extract_field
 from logic.backtest.runner import run_backtest
 from utils.report import render_table_eaw
 
@@ -64,13 +64,12 @@ def run_tuning(
 ) -> Tuple[List[Dict], Dict]:
     start_ts = datetime.now()
     settings = load_settings(Path("settings.json"))  # 필수 키 없으면 예외
-    end_bound = pd.Timestamp.today().normalize()
-    start_bound = end_bound - pd.DateOffset(months=settings["months_range"])
+    start_bound, warmup_start, end_bound = compute_bounds(settings)
 
     try:
-        pre_prices = download_prices(settings, start_bound)
-        pre_opens = download_opens(settings, start_bound)
-        pre_fx = download_fx(start_bound)
+        pre_prices = download_prices(settings, warmup_start)
+        pre_opens = download_opens(settings, warmup_start)
+        pre_fx = download_fx(warmup_start)
         bench_raw_entries = settings["benchmarks"]
         bench_tickers = []
         for b in bench_raw_entries:
@@ -80,7 +79,7 @@ def run_tuning(
                 ticker = str(b)
             if ticker:
                 bench_tickers.append(ticker)
-        bench_raw = yf.download(bench_tickers, start=start_bound, auto_adjust=True, progress=False)
+        bench_raw = yf.download(bench_tickers, start=warmup_start, auto_adjust=True, progress=False)
         if bench_raw is None or len(bench_raw) == 0:
             raise ValueError(f"벤치마크 데이터를 받아오지 못했습니다: {settings['benchmarks']}")
         pre_bench = _extract_field(bench_raw, "Close", bench_tickers)

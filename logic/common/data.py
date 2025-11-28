@@ -5,6 +5,14 @@ from typing import Dict, List
 import pandas as pd
 import yfinance as yf
 
+def compute_bounds(settings: Dict, end_bound: pd.Timestamp | None = None):
+    """백테스트/튜닝/추천 모두 동일한 기간 산정 로직을 사용하도록 범위를 계산."""
+    end = end_bound or pd.Timestamp.today().normalize()
+    start = end - pd.DateOffset(months=settings["months_range"])
+    warmup_bdays = max(settings["ma_long"] * 2 + 10, 300)
+    warmup_start = start - pd.offsets.BDay(warmup_bdays)
+    return start, warmup_start, end
+
 
 def _extract_field(data: pd.DataFrame, field: str, tickers: List[str]) -> pd.DataFrame:
     """yfinance 다운로드 결과에서 특정 필드(Open/Close 등)를 안전하게 추출."""
