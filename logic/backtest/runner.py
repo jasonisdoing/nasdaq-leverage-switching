@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from config import INITIAL_CAPITAL_KRW
-from logic.common.data import download_fx, download_prices, _extract_close
+from config import BACKTEST_SLIPPAGE, INITIAL_CAPITAL_KRW
+from logic.common.data import download_fx, download_opens, download_prices, _extract_field
 from utils.report import format_kr_money, render_table_eaw
 
 
@@ -36,6 +36,7 @@ def run_backtest(
     settings: Dict,
     *,
     pre_prices: pd.DataFrame | None = None,
+    pre_opens: pd.DataFrame | None = None,
     pre_fx: pd.Series | None = None,
     pre_bench: pd.DataFrame | None = None,
     start_bound_override: pd.Timestamp | None = None,
@@ -44,12 +45,14 @@ def run_backtest(
     start_bound = start_bound_override or end_bound - pd.DateOffset(months=settings["months_range"])
 
     prices = pre_prices.copy() if pre_prices is not None else download_prices(settings, start_bound)
+    opens = pre_opens.copy() if pre_opens is not None else download_opens(settings, start_bound)
     signal_df = compute_signals(prices[settings["signal_symbol"]], settings)
-    common_index = signal_df.index.intersection(prices.index)
+    common_index = signal_df.index.intersection(prices.index).intersection(opens.index)
     prices = prices.loc[common_index]
+    opens = opens.loc[common_index]
     signal_df = signal_df.loc[common_index]
 
-    returns = prices[settings["trade_symbols"]].pct_change().dropna()
+    returns = opens[settings["trade_symbols"]].pct_change().dropna()
     if returns.empty:
         raise ValueError("수익률 데이터가 비어 있습니다. 가격/기간 설정을 확인하세요.")
     signal_df = signal_df.loc[returns.index]
@@ -75,14 +78,23 @@ def run_backtest(
     win_days = {s: 0 for s in settings["trade_symbols"]}
     trade_days = {s: 0 for s in settings["trade_symbols"]}
     prev_target = None
+    buy_slip = BACKTEST_SLIPPAGE.get("buy_pct", 0) / 100
+    sell_slip = BACKTEST_SLIPPAGE.get("sell_pct", 0) / 100
 
     for date, row in returns.iterrows():
         target = signal_df.at[date, "target"]
         daily_ret = row[target]
 
-        capital_before = capital_usd
-        pnl = capital_before * daily_ret
-        capital_usd *= 1 + daily_ret
+        # 슬리피지 적용: 전 포지션 청산 + 신규 진입을 시초가 기준 비용 반영
+        if prev_target and prev_target != target:
+            capital_usd *= 1 - sell_slip
+        if prev_target != target:
+            capital_usd *= 1 + daily_ret
+            capital_usd *= 1 - buy_slip
+        else:
+            capital_usd *= 1 + daily_ret
+
+        pnl = capital_usd - (equity[-1] if equity else initial_capital_usd)
 
         equity.append(capital_usd)
         daily_rets.append(daily_ret)
@@ -94,7 +106,7 @@ def run_backtest(
                 asset_exposure_days[sym] += 1
                 asset_pnl[sym] += pnl
                 trade_days[sym] += 1
-                if row[sym] > 0:
+                if daily_ret > 0:
                     win_days[sym] += 1
                 if prev_target != sym:
                     trade_counts[sym] += 1
@@ -261,7 +273,7 @@ def run_backtest(
             bench_prices = pre_bench.copy()
         else:
             bench_raw = yf.download(bench_tickers, start=start_bound, auto_adjust=True, progress=False)
-            bench_prices = _extract_close(bench_raw, bench_tickers)
+            bench_prices = _extract_field(bench_raw, "Close", bench_tickers)
         bench_prices = bench_prices.reindex(equity_series.index, method="ffill")
         for b in bench_info:
             t = b["ticker"]

@@ -6,10 +6,11 @@
         "QLD",
         "TQQQ"
     ],
+    "backtested_date": "2025-11-28",
     "ma_short": 50,
     "ma_long": 120,
     "vol_lookback": 10,
-    "vol_cutoff": 0.20,
+    "vol_cutoff": 0.4500000000000001,
     "drawdown_cutoff": 0.1,
     "benchmarks": [
         {

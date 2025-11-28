@@ -11,7 +11,7 @@ import pandas as pd
 import yfinance as yf
 
 from logic.common.settings import load_settings
-from logic.common.data import download_fx, download_prices, _extract_close
+from logic.common.data import download_fx, download_opens, download_prices, _extract_field
 from logic.backtest.runner import run_backtest
 from utils.report import render_table_eaw
 
@@ -21,13 +21,27 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return "yfratelimiterror" in s or "rate limit" in s
 
 
-def _run_single(args: Tuple[Dict, Dict, pd.DataFrame, pd.Series, pd.DataFrame, pd.Timestamp]) -> Dict:
-    base_settings, overrides, pre_prices, pre_fx, pre_bench, start_bound = args
+def _is_network_or_data_error(exc: Exception) -> bool:
+    s = repr(exc).lower()
+    keywords = [
+        "dnserror",
+        "could not resolve host",
+        "timed out",
+        "operation timed out",
+        "시가 데이터가 비어 있습니다",
+        "가격 데이터를 받아오지 못했습니다",
+    ]
+    return any(k in s for k in keywords)
+
+
+def _run_single(args: Tuple[Dict, Dict, pd.DataFrame, pd.DataFrame, pd.Series, pd.DataFrame, pd.Timestamp]) -> Dict:
+    base_settings, overrides, pre_prices, pre_opens, pre_fx, pre_bench, start_bound = args
     tuned = dict(base_settings)
     tuned.update(overrides)
     report = run_backtest(
         tuned,
         pre_prices=pre_prices,
+        pre_opens=pre_opens,
         pre_fx=pre_fx,
         pre_bench=pre_bench,
         start_bound_override=start_bound,
@@ -55,11 +69,21 @@ def run_tuning(
 
     try:
         pre_prices = download_prices(settings, start_bound)
+        pre_opens = download_opens(settings, start_bound)
         pre_fx = download_fx(start_bound)
-        bench_raw = yf.download(settings["benchmarks"], start=start_bound, auto_adjust=True, progress=False)
+        bench_raw_entries = settings["benchmarks"]
+        bench_tickers = []
+        for b in bench_raw_entries:
+            if isinstance(b, dict):
+                ticker = b.get("ticker")
+            else:
+                ticker = str(b)
+            if ticker:
+                bench_tickers.append(ticker)
+        bench_raw = yf.download(bench_tickers, start=start_bound, auto_adjust=True, progress=False)
         if bench_raw is None or len(bench_raw) == 0:
             raise ValueError(f"벤치마크 데이터를 받아오지 못했습니다: {settings['benchmarks']}")
-        pre_bench = _extract_close(bench_raw, settings["benchmarks"])
+        pre_bench = _extract_field(bench_raw, "Close", bench_tickers)
     except Exception as exc:
         if _is_rate_limit_error(exc):
             raise SystemExit("yfinance YFRateLimitError: 잠시 후 다시 실행하세요.") from exc
@@ -89,7 +113,10 @@ def run_tuning(
 
     with ProcessPoolExecutor(max_workers=workers) as ex:
         future_map = {
-            ex.submit(_run_single, (settings, overrides, pre_prices, pre_fx, pre_bench, start_bound)): overrides
+            ex.submit(
+                _run_single,
+                (settings, overrides, pre_prices, pre_opens, pre_fx, pre_bench, start_bound),
+            ): overrides
             for overrides in combos
         }
         for fut in as_completed(future_map):
@@ -98,11 +125,10 @@ def run_tuning(
                 results.append(res)
             except Exception as exc:
                 overrides = future_map[fut]
-                if _is_rate_limit_error(exc):
-                    print("YFRateLimitError 감지: 잠시 후 다시 실행하세요.")
+                if _is_rate_limit_error(exc) or _is_network_or_data_error(exc):
+                    print(f"[튜닝 중단] 네트워크/데이터 오류 감지: {exc}")
                     raise SystemExit(1) from exc
                 print(f"[튜닝 경고] 조합 {overrides} 실패: {exc}")
-                continue
             completed += 1
             progress = int(completed / total_cases * 100)
             if progress_cb and progress >= next_progress:
