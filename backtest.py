@@ -72,6 +72,8 @@ def main() -> None:
         for line in report["bench_table_lines"]:
             print(line)
 
+    print(f"백테스트 결과 저장: {out_path}")
+
 
 if __name__ == "__main__":
     main()

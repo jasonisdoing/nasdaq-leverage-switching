@@ -14,8 +14,9 @@ from utils.report import render_table_eaw
 # 최근 결과를 반영해 유효 구간을 좁힌 버전
 TUNING_CONFIG: Dict[str, np.ndarray] = {
     "ma_short": np.arange(20, 60, 10),
-    "ma_long": np.arange(100, 150, 10),
-    "drawdown_cutoff": [1, 2, 3, 4, 5],
+    "ma_long": np.arange(60, 150, 10),
+    "drawdown_cutoff": [2],
+    "defense_ticker": ["SCHD", "SGOV", "O", "SPMO", "XLU"],
 }
 
 
@@ -85,10 +86,13 @@ def main() -> None:
             json.dump(best, f, ensure_ascii=False, indent=4)
         print(f"settings.json을 최적 파라미터로 업데이트했습니다. (backtested_date={best['backtested_date']})")
 
+    pr_label = f"{meta.get('months_range', 'N')}개월 수익률(%)" if meta else "N개월 수익률(%)"
     headers = [
+        "defense_ticker",
         "ma_short",
         "ma_long",
         "drawdown_cutoff",
+        pr_label,
         "CAGR(%)",
         "MDD(%)",
         "Sharpe",
@@ -100,10 +104,12 @@ def main() -> None:
         p = row["params"]
         rows.append(
             [
+                str(p.get("defense_ticker", "")),
                 str(p["ma_short"]),
                 str(p["ma_long"]),
                 f"{p['drawdown_cutoff']:.2f}",
                 f"{row['cagr']*100:.2f}",
+                f"{row.get('period_return',0.0)*100:.2f}",
                 f"{row['mdd']*100:.2f}",
                 f"{row['sharpe']:.2f}",
                 f"{row['vol']*100:.2f}",
@@ -121,11 +127,23 @@ def main() -> None:
         f.write("\n")
 
         f.write("=== 튜닝 설정 ===\n")
+        if meta and meta.get("period_start") and meta.get("period_end"):
+            f.write(
+                f"기간: {meta['period_start']} ~ {meta['period_end']} ({meta['period_months']} 개월)\n"
+            )
+        else:
+            f.write(f"기간: {start_ts.date()} ~ {end_ts.date()}\n")
         f.write("탐색 공간: ")
         parts = [f"{k} {len(v)}개" for k, v in TUNING_CONFIG.items()]
         f.write(" × ".join(parts) + f" = {total_cases}개 조합\n")
         for k, v in TUNING_CONFIG.items():
-            f.write(f"  {k}: {v[0]}~{v[-1]}\n")
+            if isinstance(v[0], str):
+                f.write(f"  {k}: {list(v)}\n")
+            else:
+                if len(v) == 1:
+                    f.write(f"  {k}: {v[0]}\n")
+                else:
+                    f.write(f"  {k}: {v[0]}~{v[-1]}\n")
         f.write("\n")
 
         f.write("=== 결과 - 정렬 기준: CAGR ===\n")

@@ -52,6 +52,7 @@ def _run_single(args: Tuple[Dict, Dict, pd.DataFrame, pd.DataFrame, pd.Series, p
         "mdd": report["max_drawdown"],
         "sharpe": report["sharpe"],
         "vol": report["vol"],
+        "period_return": report.get("period_return", 0.0),
     }
 
 
@@ -67,8 +68,15 @@ def run_tuning(
     start_bound, warmup_start, end_bound = compute_bounds(settings)
 
     try:
-        pre_prices = download_prices(settings, warmup_start)
-        pre_opens = download_opens(settings, warmup_start)
+        # 프리패치: 방어자산 후보까지 모두 포함해 한 번에 다운로드
+        all_defs = list(tuning_config.get("defense_ticker", []))
+        tickers = list({settings["trade_ticker"], settings["signal_ticker"], *all_defs})
+        price_raw = yf.download(tickers, start=warmup_start, auto_adjust=True, progress=False)
+        if price_raw is None or len(price_raw) == 0:
+            raise ValueError(f"가격 데이터를 받아오지 못했습니다: {tickers}")
+        pre_prices = _extract_field(price_raw, "Close", tickers)
+        pre_opens = _extract_field(price_raw, "Open", tickers)
+
         pre_fx = download_fx(warmup_start)
         bench_raw_entries = settings["benchmarks"]
         bench_tickers = []
@@ -92,13 +100,15 @@ def run_tuning(
     for ma_s in tuning_config["ma_short"]:
         for ma_l in tuning_config["ma_long"]:
             for dd_cut in tuning_config["drawdown_cutoff"]:
-                combos.append(
-                    {
-                        "ma_short": int(ma_s),
-                        "ma_long": int(ma_l),
-                        "drawdown_cutoff": float(dd_cut),
-                    }
-                )
+                for def_t in tuning_config["defense_ticker"]:
+                    combos.append(
+                        {
+                            "ma_short": int(ma_s),
+                            "ma_long": int(ma_l),
+                            "drawdown_cutoff": float(dd_cut),
+                            "defense_ticker": str(def_t),
+                        }
+                    )
 
     total_cases = len(combos)
     workers = max_workers or cpu_count() or 1
@@ -134,14 +144,25 @@ def run_tuning(
 
     # 정렬: CAGR 내림차순
     results.sort(key=lambda x: x["cagr"], reverse=True)
-    return results, {"start_ts": start_ts, "total": total_cases}
+    months = round((end_bound - start_bound).days / 30.0, 1)
+    return results, {
+        "start_ts": start_ts,
+        "total": total_cases,
+        "period_start": start_bound.date(),
+        "period_end": end_bound.date(),
+        "period_months": months,
+        "months_range": settings["months_range"],
+    }
 
 
-def render_top_table(results: List[Dict], top_n: int = 100) -> List[str]:
+def render_top_table(results: List[Dict], top_n: int = 100, months_range: int | None = None) -> List[str]:
+    pr_label = f"{months_range}개월 수익률(%)" if months_range else "N개월 수익률(%)"
     headers = [
+        "defense_ticker",
         "ma_short",
         "ma_long",
         "drawdown_cutoff",
+        pr_label,
         "CAGR(%)",
         "MDD(%)",
         "Sharpe",
@@ -153,9 +174,11 @@ def render_top_table(results: List[Dict], top_n: int = 100) -> List[str]:
         p = row["params"]
         rows.append(
             [
+                str(p.get("defense_ticker", "")),
                 str(p["ma_short"]),
                 str(p["ma_long"]),
                 f"{p['drawdown_cutoff']:.2f}",
+                f"{row.get('period_return', 0.0)*100:.2f}",
                 f"{row['cagr']*100:.2f}",
                 f"{row['mdd']*100:.2f}",
                 f"{row['sharpe']:.2f}",

@@ -25,4 +25,7 @@ def load_settings(path: Path) -> Dict:
     if missing:
         raise ValueError(f"settings.json에 필수 키가 없습니다: {missing}")
 
+    if settings.get("defense_ticker") == "CASH":
+        raise ValueError("defense_ticker에 CASH는 더 이상 허용되지 않습니다.")
+
     return settings

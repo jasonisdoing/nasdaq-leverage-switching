@@ -29,9 +29,7 @@ def run_backtest(
 
     offense = settings["trade_ticker"]
     defense = settings["defense_ticker"]
-    assets = [offense]
-    if defense != "CASH":
-        assets.append(defense)
+    assets = list({offense, defense})
 
     signal_df_full = compute_signals(prices_full[settings["signal_ticker"]], settings)
     returns_full = opens_full[assets].pct_change()
@@ -410,10 +408,11 @@ def run_backtest(
     )
 
     # 전략 vs 벤치마크 비교 테이블
+    strat_label = f"{settings['trade_ticker']}<->{settings['defense_ticker']}"
     perf_rows = [
         [
             "1",
-            "백테스트 결과",
+            strat_label,
             f"{period_return*100:+.2f}%",
             f"{cagr*100:+.2f}%",
             f"{max_dd*100:.2f}%",
@@ -444,7 +443,7 @@ def run_backtest(
         )
 
     bench_table_lines = render_table_eaw(
-        ["#", "티커", "기간수익률(%)", "CAGR(%)", "MDD(%)"],
+        ["#", "티커", f"{settings['months_range']}개월 수익률(%)", "CAGR(%)", "MDD(%)"],
         perf_rows,
         ["center", "left", "right", "right", "right"],
     )
@@ -585,6 +584,7 @@ def run_backtest(
         "end": end_date.isoformat(),
         "final_equity_usd": round(equity_series.iloc[-1], 2),
         "final_equity_krw": round(final_krw, 0),
+        "period_return": period_return,
         "cagr": cagr,
         "vol": vol,
         "sharpe": sharpe,
