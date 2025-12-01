@@ -15,8 +15,26 @@ from utils.report import render_table_eaw
 TUNING_CONFIG: Dict[str, np.ndarray] = {
     "ma_short": np.arange(20, 60, 10),
     "ma_long": np.arange(60, 150, 10),
+    # "ma_short": [40],
+    # "ma_long": [120],
     "drawdown_cutoff": [2],
-    "defense_ticker": ["SCHD", "SGOV", "O", "SPMO", "XLU"],
+    "defense_ticker": [
+    "SCHD", "SGOV", "O", "VOO", "QQQ", "SPMO", "SPLV", "DIVO",
+    # 섹터 ETF
+    # "XLE",  # 에너지
+    # "XLB",  # 소재
+    # "XLI",  # 산업재
+    "XLY",  # 임의소비재
+    "XLP",  # 필수소비재
+    # "XLV",  # 헬스케어
+    # "XLF",  # 금융
+    # "XLK",  # 정보기술
+    "XLU",  # 유틸리티
+    "XLRE", # 리츠
+    # "XLC",  # 커뮤니케이션
+    # 세부 산업 ETF
+    # "XME"   # 금속 & 광업 (Materials 세부 ETF)
+]
 }
 
 
