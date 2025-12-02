@@ -7,7 +7,13 @@ import pandas as pd
 import yfinance as yf
 
 from config import INITIAL_CAPITAL_KRW
-from logic.common.data import compute_bounds, download_fx, download_opens, download_prices, _extract_field
+from logic.common.data import (
+    compute_bounds,
+    download_fx,
+    download_opens,
+    download_prices,
+    _extract_field,
+)
 from logic.common.signals import compute_signals, pick_target
 from utils.report import format_kr_money, render_table_eaw
 
@@ -24,8 +30,16 @@ def run_backtest(
     start_bound_base, warmup_start, end_bound = compute_bounds(settings)
     start_bound = start_bound_override or start_bound_base
 
-    prices_full = pre_prices.copy() if pre_prices is not None else download_prices(settings, warmup_start)
-    opens_full = pre_opens.copy() if pre_opens is not None else download_opens(settings, warmup_start)
+    prices_full = (
+        pre_prices.copy()
+        if pre_prices is not None
+        else download_prices(settings, warmup_start)
+    )
+    opens_full = (
+        pre_opens.copy()
+        if pre_opens is not None
+        else download_opens(settings, warmup_start)
+    )
 
     offense = settings["trade_ticker"]
     defense = settings["defense_ticker"]
@@ -34,16 +48,33 @@ def run_backtest(
     signal_df_full = compute_signals(prices_full[settings["signal_ticker"]], settings)
     returns_full = opens_full[assets].pct_change()
 
-    common_index = signal_df_full.index.intersection(prices_full.index).intersection(opens_full.index).intersection(returns_full.index)
+    common_index = (
+        signal_df_full.index.intersection(prices_full.index)
+        .intersection(opens_full.index)
+        .intersection(returns_full.index)
+    )
     common_index = common_index[common_index >= start_bound]
 
-    prices = prices_full.loc[common_index]
     opens = opens_full.loc[common_index]
     signal_df = signal_df_full.loc[common_index]
     returns = returns_full.loc[common_index]
     if returns.dropna().empty:
         raise ValueError("수익률 데이터가 비어 있습니다. 가격/기간 설정을 확인하세요.")
-    signal_df["target"] = signal_df.apply(lambda row: pick_target(row, settings), axis=1)
+
+    # 상태 기반 로직(이중 임계값)을 위해 순차적으로 타깃 결정
+    targets = []
+    prev_target = None
+    # 첫 날의 이전 타깃은 없으므로, 첫 날은 드로다운만 보고 결정 (pick_target 내부에서 처리 필요하거나, 여기서 초기값 설정)
+    # pick_target 로직상 prev_target이 None이면 offense로 가정하거나, 별도 처리 필요.
+    # 여기서는 "공격 자산 보유 중"이었다고 가정하고 시작 (일반적인 백테스트 관례)
+    prev_target = settings["trade_ticker"]
+
+    for idx, row in signal_df.iterrows():
+        tgt = pick_target(row, prev_target, settings)
+        targets.append(tgt)
+        prev_target = tgt
+
+    signal_df["target"] = targets
 
     # 환율 데이터(원/달러)
     fx = pre_fx.copy() if pre_fx is not None else download_fx(start_bound)
@@ -83,6 +114,7 @@ def run_backtest(
             segment_lines.append(f" - 보유수량: {qty_val:,}")
             segment_lines.append(f" - 손익: ${pnl_val:,.2f}")
             segment_lines.append(f" - 손익(%): {pct_val*100:+.4f}%")
+
     hold_days = {s: 0 for s in assets}
     asset_pnl = {s: 0.0 for s in assets}
     prev_pos_value = {s: 0.0 for s in assets}
@@ -99,7 +131,9 @@ def run_backtest(
     for date in common_index:
         start_value_today = last_total_value
         target = signal_df.at[date, "target"]
-        trade_cf = {s: 0.0 for s in assets}  # 자산별 현금흐름(매수+: 자금투입, 매도-: 인출)
+        trade_cf = {
+            s: 0.0 for s in assets
+        }  # 자산별 현금흐름(매수+: 자금투입, 매도-: 인출)
         end_val_for_seg = None
         changed = seg_target is not None and target != seg_target
 
@@ -124,7 +158,9 @@ def run_backtest(
 
         # 세그먼트 전환 처리: 청산 후 평가액을 사용해 종료
         if changed:
-            end_value = end_val_for_seg if end_val_for_seg is not None else start_value_today
+            end_value = (
+                end_val_for_seg if end_val_for_seg is not None else start_value_today
+            )
             pnl_seg = end_value - seg_start_value
             pct_seg = (end_value / seg_start_value - 1) if seg_start_value != 0 else 0.0
             _add_segment(
@@ -195,7 +231,10 @@ def run_backtest(
             position_value = {s: qty[s] * prices_today[s] for s in assets}
             total_pos = sum(position_value.values())
             total_value = cash_usd + total_pos
-            weights = {s: (position_value[s] / total_value if total_value > 0 else 0.0) for s in assets}
+            weights = {
+                s: (position_value[s] / total_value if total_value > 0 else 0.0)
+                for s in assets
+            }
             cash_value = cash_usd
         fx_today = fx.loc[date]
         krw_value = total_value * fx_today
@@ -270,21 +309,26 @@ def run_backtest(
 
             eval_pnl = pnl if sym == target else 0.0
             eval_pct = ret if weight > 0 else 0.0
-            
+
             note = ""
             if sym == target:
                 note = "타깃"
             elif sym == settings["trade_ticker"] and state in ["WAIT", "SELL"]:
                 # Trade Ticker가 선택되지 않은 경우 드로다운 정보 표시
                 current_dd = signal_df.at[date, "drawdown"]
-                dd_cutoff_raw = settings["drawdown_cutoff"]
-                dd_cutoff = dd_cutoff_raw / 100 if dd_cutoff_raw > 1 else dd_cutoff_raw
-                threshold = -dd_cutoff
-                
+
+                # 현재 상태에 따라 적용되는 컷오프가 다름
+                # 하지만 "왜 안 샀냐"를 설명할 때는 "매수 기준"을 보여주는 것이 적절함
+                # 또는 현재 보유 중이 아니므로 매수 기준(buy_cutoff)을 만족해야 함
+
+                buy_cut_raw = settings["drawdown_buy_cutoff"]
+                buy_cut = buy_cut_raw / 100 if buy_cut_raw > 1 else buy_cut_raw
+                threshold = -buy_cut
+
                 # 드로다운이 임계값보다 낮아서(더 많이 떨어져서) 못 사는 경우
                 if current_dd <= threshold:
                     needed = threshold - current_dd
-                    note = f"DD {current_dd*100:.2f}% (컷 {threshold*100:.2f}%, 필요 {needed*100:+.2f}%)"
+                    note = f"DD {current_dd*100:.2f}% (매수컷 {threshold*100:.2f}%, 필요 {needed*100:+.2f}%)"
 
             rows.append(
                 [
@@ -358,7 +402,9 @@ def run_backtest(
         if pre_bench is not None:
             bench_prices = pre_bench.copy()
         else:
-            bench_raw = yf.download(bench_tickers, start=start_bound, auto_adjust=True, progress=False)
+            bench_raw = yf.download(
+                bench_tickers, start=start_bound, auto_adjust=True, progress=False
+            )
             bench_prices = _extract_field(bench_raw, "Close", bench_tickers)
         bench_prices = bench_prices.reindex(equity_series.index, method="ffill")
         for b in bench_info:
@@ -493,9 +539,11 @@ def run_backtest(
                 str(days),
                 str(trades),
                 f"{win_rate_sym:.1f}%",
-                "주요 기여"
-                if (total_pnl != 0 and abs(pnl_usd) >= abs(total_pnl) * 0.1)
-                else "",
+                (
+                    "주요 기여"
+                    if (total_pnl != 0 and abs(pnl_usd) >= abs(total_pnl) * 0.1)
+                    else ""
+                ),
             ]
         )
 
@@ -510,9 +558,21 @@ def run_backtest(
         "승률",
         "비고",
     ]
-    asset_aligns = ["center", "center", "right", "right", "right", "right", "right", "right", "left"]
+    asset_aligns = [
+        "center",
+        "center",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+        "left",
+    ]
     asset_summary_lines = ["7. ========= 종목별 성과 요약 =========="]
-    asset_summary_lines.extend(render_table_eaw(asset_headers, asset_rows, asset_aligns))
+    asset_summary_lines.extend(
+        render_table_eaw(asset_headers, asset_rows, asset_aligns)
+    )
 
     # 주별/월별 성과 요약
     weekly_lines: List[str] = ["5. ========= 주별 성과 요약 =========="]
@@ -546,7 +606,7 @@ def run_backtest(
         # 'M'는 pandas에서 deprecated 예정 → 'ME'(month end)로 변경
         monthly = krw_series.resample("ME").last().dropna()
         monthly_ret = monthly.pct_change().fillna(0)
-        base = INITIAL_CAPITAL_KRW
+
         years = sorted({d.year for d in monthly.index})
         headers = ["연도"] + [f"{m}월" for m in range(1, 13)] + ["연간"]
         rows = []
@@ -555,18 +615,27 @@ def run_backtest(
             year_vals = monthly[monthly.index.year == yr]
             year_ret = None
             for m in range(1, 13):
-                dts = year_vals[year_vals.index.month == m].index
-                if len(dts) == 0:
+                # Find the date for the last day of the month in the current year
+                # This handles cases where a month might be missing or incomplete
+                month_end_dates = year_vals[year_vals.index.month == m].index
+                if len(month_end_dates) == 0:
                     monthly_vals.append("  -    ")
                     continue
-                dt = dts[0]
+                # Use the last available date for the month to get its return
+                dt = month_end_dates[-1]
                 r = monthly_ret.loc[dt]
                 monthly_vals.append(f"{r*100:+.2f}%")
             if len(year_vals) > 0:
                 year_ret = year_vals.iloc[-1] / year_vals.iloc[0] - 1
-            rows.append([str(yr)] + monthly_vals + [f"{year_ret*100:+.2f}%" if year_ret is not None else "  -    "])
+            rows.append(
+                [str(yr)]
+                + monthly_vals
+                + [f"{year_ret*100:+.2f}%" if year_ret is not None else "  -    "]
+            )
 
-        monthly_lines.extend(render_table_eaw(headers, rows, ["center"] + ["right"] * 13 + ["right"]))
+        monthly_lines.extend(
+            render_table_eaw(headers, rows, ["center"] + ["right"] * 13 + ["right"])
+        )
     except Exception:
         monthly_lines.append("| 월간 요약 생성 실패")
 
@@ -574,7 +643,8 @@ def run_backtest(
         "3. ========= 사용된 설정값 ==========",
         f"| 테스트 기간: 최근 {settings['months_range']}개월 (실제 {months}개월)",
         f"| 초기 자본: {format_kr_money(INITIAL_CAPITAL_KRW)}",
-        f"| drawdown_cutoff: {settings['drawdown_cutoff']}%",
+        f"| buy_cutoff: {settings['drawdown_buy_cutoff']}%",
+        f"| sell_cutoff: {settings['drawdown_sell_cutoff']}%",
         f"| signal_ticker: {settings['signal_ticker']}",
         f"| trade_ticker: {settings['trade_ticker']}",
         f"| defense_ticker: {settings['defense_ticker']}",

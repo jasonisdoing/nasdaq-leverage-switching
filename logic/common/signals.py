@@ -19,16 +19,28 @@ def compute_signals(prices: pd.Series, settings: Dict) -> pd.DataFrame:
     return df.dropna()
 
 
-def pick_target(row, settings: Dict) -> str:
-    """신호 행을 받아 매수 대상 티커를 결정합니다."""
-    dd_cutoff_raw = settings["drawdown_cutoff"]
-    dd_cutoff = dd_cutoff_raw / 100 if dd_cutoff_raw > 1 else dd_cutoff_raw
+def pick_target(row, prev_target: str, settings: Dict) -> str:
+    """
+    신호 행과 이전 타깃을 받아 매수 대상 티커를 결정합니다 (이중 임계값 적용).
+
+    - drawdown_buy_cutoff (예: 1.0 -> -1.0%): 이보다 높으면(회복되면) 공격 자산 매수
+    - drawdown_sell_cutoff (예: 2.0 -> -2.0%): 이보다 낮으면(악화되면) 공격 자산 매도
+    """
+    buy_cut = -settings["drawdown_buy_cutoff"] / 100
+    sell_cut = -settings["drawdown_sell_cutoff"] / 100
+
     offense = settings["trade_ticker"]
     defense = settings["defense_ticker"]
 
-    # 방어/공격 두 자산 전환 (방어가 CASH거나 ETF여도 동일 로직)
-    if row["drawdown"] <= -dd_cutoff:
+    current_dd = row["drawdown"]
+
+    if prev_target == offense:
+        # 공격 자산 보유 중: 매도 기준보다 더 떨어지면 방어 전환
+        if current_dd < sell_cut:
+            return defense
+        return offense
+    else:
+        # 방어 자산 보유 중: 매수 기준보다 더 오르면 공격 전환
+        if current_dd > buy_cut:
+            return offense
         return defense
-    
-    # MA 조건 제거: 드로다운 조건만 만족하면 공격 자산 보유
-    return offense

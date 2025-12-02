@@ -1,11 +1,4 @@
 repos:
-  - repo: local
-    hooks:
-      - id: update-app-datetime
-        name: Update APP_VERSION
-        entry: ./update_app_datetime.sh
-        language: system
-        stages: [pre-commit, pre-push]
 
   - repo: https://github.com/psf/black
     rev: 24.3.0
