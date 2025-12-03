@@ -4,8 +4,8 @@ __pycache__/
 venv/
 *.pyc
 
-# 메모 파일
-memo*.txt
+# 노트 파일
+znotes/
 
 # 백테스트 결과
-zresults/
+zresults
