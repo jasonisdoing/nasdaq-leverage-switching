@@ -1,12 +1,10 @@
 """데이터 다운로드/전처리 공용 함수."""
 
-from typing import Dict, List
-
 import pandas as pd
 import yfinance as yf
 
 
-def compute_bounds(settings: Dict, end_bound: pd.Timestamp | None = None):
+def compute_bounds(settings: dict, end_bound: pd.Timestamp | None = None):
     """백테스트/튜닝/추천 모두 동일한 기간 산정 로직을 사용하도록 범위를 계산."""
     end = end_bound or pd.Timestamp.today().normalize()
     start = end - pd.DateOffset(months=settings["months_range"])
@@ -15,7 +13,7 @@ def compute_bounds(settings: Dict, end_bound: pd.Timestamp | None = None):
     return start, warmup_start, end
 
 
-def _extract_field(data: pd.DataFrame, field: str, tickers: List[str]) -> pd.DataFrame:
+def _extract_field(data: pd.DataFrame, field: str, tickers: list[str]) -> pd.DataFrame:
     """yfinance 다운로드 결과에서 특정 필드(Open/Close 등)를 안전하게 추출."""
     key = field.lower()
     if isinstance(data.columns, pd.MultiIndex):
@@ -33,9 +31,7 @@ def _extract_field(data: pd.DataFrame, field: str, tickers: List[str]) -> pd.Dat
             if level_idx is not None:
                 break
         if level_idx is None:
-            raise ValueError(
-                f"{field} 컬럼을 찾지 못했습니다. 사용 가능 컬럼: {list(data.columns)}"
-            )
+            raise ValueError(f"{field} 컬럼을 찾지 못했습니다. 사용 가능 컬럼: {list(data.columns)}")
         out = data.xs(field_key, axis=1, level=level_idx)
     else:
         candidates = [c for c in [field, field.capitalize()] if c in data.columns]
@@ -46,7 +42,7 @@ def _extract_field(data: pd.DataFrame, field: str, tickers: List[str]) -> pd.Dat
     return out
 
 
-def download_prices(settings: Dict, start) -> pd.DataFrame:
+def download_prices(settings: dict, start) -> pd.DataFrame:
     tickers = list(
         {
             settings["trade_ticker"],
@@ -69,7 +65,7 @@ def download_prices(settings: Dict, start) -> pd.DataFrame:
     return prices
 
 
-def download_opens(settings: Dict, start) -> pd.DataFrame:
+def download_opens(settings: dict, start) -> pd.DataFrame:
     tickers = list(
         {
             settings["trade_ticker"],

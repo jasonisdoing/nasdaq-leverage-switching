@@ -3,9 +3,9 @@
 from datetime import datetime
 from pathlib import Path
 
+from config import INITIAL_CAPITAL_KRW
 from logic.backtest.runner import run_backtest
 from logic.common.settings import load_settings
-from config import INITIAL_CAPITAL_KRW
 
 
 def main() -> None:
@@ -24,10 +24,7 @@ def main() -> None:
     out_path = out_dir / f"backtest_{datetime.now().date()}.log"
     with out_path.open("w", encoding="utf-8") as f:
         f.write(f"백테스트 로그 생성: {datetime.now().isoformat()}\n")
-        f.write(
-            f"초기자본: {INITIAL_CAPITAL_KRW:,} | 시작일: {report['start']} | "
-            f"종료일: {report['end']}\n\n"
-        )
+        f.write(f"초기자본: {INITIAL_CAPITAL_KRW:,} | 시작일: {report['start']} | 종료일: {report['end']}\n\n")
         f.write("2. ========= 일자별 성과 ==========\n\n")
         if report.get("segment_lines"):
             f.write("=== 구간별 보유 요약 ===\n")

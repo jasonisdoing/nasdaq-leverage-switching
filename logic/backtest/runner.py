@@ -1,45 +1,35 @@
 """백테스트 핵심 로직."""
 
-from typing import Dict, List
-
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
 from config import INITIAL_CAPITAL_KRW
 from logic.common.data import (
+    _extract_field,
     compute_bounds,
     download_fx,
     download_opens,
     download_prices,
-    _extract_field,
 )
 from logic.common.signals import compute_signals, pick_target
 from utils.report import format_kr_money, render_table_eaw
 
 
 def run_backtest(
-    settings: Dict,
+    settings: dict,
     *,
     pre_prices: pd.DataFrame | None = None,
     pre_opens: pd.DataFrame | None = None,
     pre_fx: pd.Series | None = None,
     pre_bench: pd.DataFrame | None = None,
     start_bound_override: pd.Timestamp | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     start_bound_base, warmup_start, end_bound = compute_bounds(settings)
     start_bound = start_bound_override or start_bound_base
 
-    prices_full = (
-        pre_prices.copy()
-        if pre_prices is not None
-        else download_prices(settings, warmup_start)
-    )
-    opens_full = (
-        pre_opens.copy()
-        if pre_opens is not None
-        else download_opens(settings, warmup_start)
-    )
+    prices_full = pre_prices.copy() if pre_prices is not None else download_prices(settings, warmup_start)
+    opens_full = pre_opens.copy() if pre_opens is not None else download_opens(settings, warmup_start)
 
     offense = settings["trade_ticker"]
     defense = settings["defense_ticker"]
@@ -64,7 +54,8 @@ def run_backtest(
     # 상태 기반 로직(이중 임계값)을 위해 순차적으로 타깃 결정
     targets = []
     prev_target = None
-    # 첫 날의 이전 타깃은 없으므로, 첫 날은 드로다운만 보고 결정 (pick_target 내부에서 처리 필요하거나, 여기서 초기값 설정)
+    # 첫 날의 이전 타깃은 없으므로, 첫 날은 드로다운만 보고 결정
+    # (pick_target 내부에서 처리 필요하거나, 여기서 초기값 설정)
     # pick_target 로직상 prev_target이 None이면 offense로 가정하거나, 별도 처리 필요.
     # 여기서는 "공격 자산 보유 중"이었다고 가정하고 시작 (일반적인 백테스트 관례)
     prev_target = settings["trade_ticker"]
@@ -90,8 +81,8 @@ def run_backtest(
 
     equity = []
     daily_rets = []
-    daily_log: List[str] = []
-    segment_lines: List[str] = []
+    daily_log: list[str] = []
+    segment_lines: list[str] = []
     seg_target = None
     seg_start_date = None
     seg_start_value = None
@@ -107,13 +98,11 @@ def run_backtest(
     def _add_segment(start_dt, end_dt, days, tgt, qty_val, pnl_val, pct_val):
         if start_dt is None or end_dt is None or tgt is None:
             return
-        segment_lines.append(
-            f"[{_fmt_date(start_dt)} ~ {_fmt_date(end_dt)}] {tgt}: {days} 거래일"
-        )
+        segment_lines.append(f"[{_fmt_date(start_dt)} ~ {_fmt_date(end_dt)}] {tgt}: {days} 거래일")
         if tgt != "CASH":
             segment_lines.append(f" - 보유수량: {qty_val:,}")
             segment_lines.append(f" - 손익: ${pnl_val:,.2f}")
-            segment_lines.append(f" - 손익(%): {pct_val*100:+.4f}%")
+            segment_lines.append(f" - 손익(%): {pct_val * 100:+.4f}%")
 
     hold_days = {s: 0 for s in assets}
     asset_pnl = {s: 0.0 for s in assets}
@@ -131,9 +120,7 @@ def run_backtest(
     for date in common_index:
         start_value_today = last_total_value
         target = signal_df.at[date, "target"]
-        trade_cf = {
-            s: 0.0 for s in assets
-        }  # 자산별 현금흐름(매수+: 자금투입, 매도-: 인출)
+        trade_cf = {s: 0.0 for s in assets}  # 자산별 현금흐름(매수+: 자금투입, 매도-: 인출)
         end_val_for_seg = None
         changed = seg_target is not None and target != seg_target
 
@@ -158,9 +145,7 @@ def run_backtest(
 
         # 세그먼트 전환 처리: 청산 후 평가액을 사용해 종료
         if changed:
-            end_value = (
-                end_val_for_seg if end_val_for_seg is not None else start_value_today
-            )
+            end_value = end_val_for_seg if end_val_for_seg is not None else start_value_today
             pnl_seg = end_value - seg_start_value
             pct_seg = (end_value / seg_start_value - 1) if seg_start_value != 0 else 0.0
             _add_segment(
@@ -231,10 +216,7 @@ def run_backtest(
             position_value = {s: qty[s] * prices_today[s] for s in assets}
             total_pos = sum(position_value.values())
             total_value = cash_usd + total_pos
-            weights = {
-                s: (position_value[s] / total_value if total_value > 0 else 0.0)
-                for s in assets
-            }
+            weights = {s: (position_value[s] / total_value if total_value > 0 else 0.0) for s in assets}
             cash_value = cash_usd
         fx_today = fx.loc[date]
         krw_value = total_value * fx_today
@@ -284,7 +266,7 @@ def run_backtest(
                 f"{cash_value:,.2f}",
                 "0",
                 "+0.0%",
-                f"{cash_value/total_value:0.1%}",
+                f"{cash_value / total_value:0.1%}",
                 "",
             ]
         )
@@ -328,7 +310,7 @@ def run_backtest(
                 # 드로다운이 임계값보다 낮아서(더 많이 떨어져서) 못 사는 경우
                 if current_dd <= threshold:
                     needed = threshold - current_dd
-                    note = f"DD {current_dd*100:.2f}% (매수컷 {threshold*100:.2f}%, 필요 {needed*100:+.2f}%)"
+                    note = f"DD {current_dd * 100:.2f}% (매수컷 {threshold * 100:.2f}%, 필요 {needed * 100:+.2f}%)"
 
             rows.append(
                 [
@@ -341,7 +323,7 @@ def run_backtest(
                     f"{qty_disp:,.0f}",
                     f"{position_value:,.2f}",
                     f"{eval_pnl:,.2f}",
-                    f"{eval_pct*100:+.2f}%",
+                    f"{eval_pct * 100:+.2f}%",
                     f"{weight:0.0%}",
                     note,
                 ]
@@ -384,7 +366,7 @@ def run_backtest(
 
     # 벤치마크(VOO, QQQ)의 기간 수익률 및 CAGR
     bench_raw_entries = settings["benchmarks"]
-    bench_info: List[Dict[str, str]] = []
+    bench_info: list[dict[str, str]] = []
     for b in bench_raw_entries:
         if isinstance(b, dict):
             ticker = b.get("ticker")
@@ -397,14 +379,12 @@ def run_backtest(
         bench_info.append({"ticker": ticker, "name": name})
     bench_tickers = [b["ticker"] for b in bench_info]
     bench_lines = []
-    bench_status: List[str] = []
+    bench_status: list[str] = []
     try:
         if pre_bench is not None:
             bench_prices = pre_bench.copy()
         else:
-            bench_raw = yf.download(
-                bench_tickers, start=start_bound, auto_adjust=True, progress=False
-            )
+            bench_raw = yf.download(bench_tickers, start=start_bound, auto_adjust=True, progress=False)
             bench_prices = _extract_field(bench_raw, "Close", bench_tickers)
         bench_prices = bench_prices.reindex(equity_series.index, method="ffill")
         for b in bench_info:
@@ -419,9 +399,7 @@ def run_backtest(
                 if first_valid is None:
                     bench_status.append(f"{t}: 데이터 없음(상장일 이후 기간 부족?)")
                 else:
-                    bench_status.append(
-                        f"{t}: 데이터 없음(가용 시작 {first_valid.date()} 이후, 기간 부족)"
-                    )
+                    bench_status.append(f"{t}: 데이터 없음(가용 시작 {first_valid.date()} 이후, 기간 부족)")
                 continue
             br = series.iloc[-1] / series.iloc[0] - 1
             cagr_b = (1 + br) ** (252 / len(series)) - 1
@@ -439,21 +417,19 @@ def run_backtest(
         f"| 기간: {start_date} ~ {end_date} ({months} 개월)",
         f"| 초기 자본: {format_kr_money(INITIAL_CAPITAL_KRW)}",
         f"| 최종 자산: {format_kr_money(final_krw)}",
-        f"| 기간수익률(%): {period_return*100:+.2f}%",
+        f"| 기간수익률(%): {period_return * 100:+.2f}%",
     ]
     requested_months = settings["months_range"]
     if months < requested_months:
-        summary_lines.append(
-            f"| 참고: months_range {requested_months} → 실제 {months}개월 (데이터 가용 기간)"
-        )
-    bench_table_lines: List[str] = []
-    bench_summary_lines: List[str] = []
+        summary_lines.append(f"| 참고: months_range {requested_months} → 실제 {months}개월 (데이터 가용 기간)")
+    bench_table_lines: list[str] = []
+    bench_summary_lines: list[str] = []
     bench_error = None
 
     summary_lines.extend(
         [
-            f"| CAGR(%): {cagr*100:+.2f}%",
-            f"| MDD(%): {max_dd*100:.2f}%",
+            f"| CAGR(%): {cagr * 100:+.2f}%",
+            f"| MDD(%): {max_dd * 100:.2f}%",
         ]
     )
 
@@ -463,9 +439,9 @@ def run_backtest(
         [
             "1",
             strat_label,
-            f"{period_return*100:+.2f}%",
-            f"{cagr*100:+.2f}%",
-            f"{max_dd*100:.2f}%",
+            f"{period_return * 100:+.2f}%",
+            f"{cagr * 100:+.2f}%",
+            f"{max_dd * 100:.2f}%",
         ]
     ]
     idx = 2
@@ -475,9 +451,9 @@ def run_backtest(
                 [
                     str(idx),
                     f"{t}({name})" if name and name != t else t,
-                    f"{br*100:+.2f}%",
-                    f"{cagr_b*100:+.2f}%",
-                    f"{dd_b*100:.2f}%",
+                    f"{br * 100:+.2f}%",
+                    f"{cagr_b * 100:+.2f}%",
+                    f"{dd_b * 100:.2f}%",
                 ]
             )
             idx += 1
@@ -539,11 +515,7 @@ def run_backtest(
                 str(days),
                 str(trades),
                 f"{win_rate_sym:.1f}%",
-                (
-                    "주요 기여"
-                    if (total_pnl != 0 and abs(pnl_usd) >= abs(total_pnl) * 0.1)
-                    else ""
-                ),
+                ("주요 기여" if (total_pnl != 0 and abs(pnl_usd) >= abs(total_pnl) * 0.1) else ""),
             ]
         )
 
@@ -570,12 +542,10 @@ def run_backtest(
         "left",
     ]
     asset_summary_lines = ["7. ========= 종목별 성과 요약 =========="]
-    asset_summary_lines.extend(
-        render_table_eaw(asset_headers, asset_rows, asset_aligns)
-    )
+    asset_summary_lines.extend(render_table_eaw(asset_headers, asset_rows, asset_aligns))
 
     # 주별/월별 성과 요약
-    weekly_lines: List[str] = ["5. ========= 주별 성과 요약 =========="]
+    weekly_lines: list[str] = ["5. ========= 주별 성과 요약 =========="]
     try:
         weekly = krw_series.resample("W-FRI").last().dropna()
         weekly_ret = weekly.pct_change().fillna(0)
@@ -587,8 +557,8 @@ def run_backtest(
                 [
                     d.date().isoformat(),
                     f"{format_kr_money(val)}",
-                    f"{weekly_ret.loc[d]*100:+.2f}%",
-                    f"{weekly_cum.loc[d]*100:+.2f}%",
+                    f"{weekly_ret.loc[d] * 100:+.2f}%",
+                    f"{weekly_cum.loc[d] * 100:+.2f}%",
                 ]
             )
         weekly_lines.extend(
@@ -601,7 +571,7 @@ def run_backtest(
     except Exception:
         weekly_lines.append("| 주간 요약 생성 실패")
 
-    monthly_lines: List[str] = ["6. ========= 월별 성과 요약 =========="]
+    monthly_lines: list[str] = ["6. ========= 월별 성과 요약 =========="]
     try:
         # 'M'는 pandas에서 deprecated 예정 → 'ME'(month end)로 변경
         monthly = krw_series.resample("ME").last().dropna()
@@ -624,18 +594,12 @@ def run_backtest(
                 # Use the last available date for the month to get its return
                 dt = month_end_dates[-1]
                 r = monthly_ret.loc[dt]
-                monthly_vals.append(f"{r*100:+.2f}%")
+                monthly_vals.append(f"{r * 100:+.2f}%")
             if len(year_vals) > 0:
                 year_ret = year_vals.iloc[-1] / year_vals.iloc[0] - 1
-            rows.append(
-                [str(yr)]
-                + monthly_vals
-                + [f"{year_ret*100:+.2f}%" if year_ret is not None else "  -    "]
-            )
+            rows.append([str(yr)] + monthly_vals + [f"{year_ret * 100:+.2f}%" if year_ret is not None else "  -    "])
 
-        monthly_lines.extend(
-            render_table_eaw(headers, rows, ["center"] + ["right"] * 13 + ["right"])
-        )
+        monthly_lines.extend(render_table_eaw(headers, rows, ["center"] + ["right"] * 13 + ["right"]))
     except Exception:
         monthly_lines.append("| 월간 요약 생성 실패")
 

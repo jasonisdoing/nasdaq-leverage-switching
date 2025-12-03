@@ -2,17 +2,14 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
 
-import numpy as np
 import pandas as pd
 
-from logic.common.signals import compute_signals, pick_target
 from logic.common.data import compute_bounds, download_prices
-from utils.report import render_table_eaw
+from logic.common.signals import compute_signals, pick_target
 
 
-def run_recommend(settings: Dict) -> Dict[str, object]:
+def run_recommend(settings: dict) -> dict[str, object]:
     start_bound, warmup_start, end_bound = compute_bounds(settings)
 
     prices_full = download_prices(settings, warmup_start)
@@ -60,11 +57,7 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
 
     # 일간 수익률은 전일 대비 종가 기준
     daily_rets = prices[assets].pct_change()
-    last_ret = (
-        daily_rets.loc[last_date]
-        if last_date in daily_rets.index
-        else pd.Series(dtype=float)
-    )
+    last_ret = daily_rets.loc[last_date] if last_date in daily_rets.index else pd.Series(dtype=float)
 
     def _gap_message(row, price_today):
         # 추천 시점의 '문구'는 보통 "왜 안 샀냐"를 설명하는 용도이므로
@@ -77,7 +70,7 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
         # 드로다운이 임계값보다 낮아서(더 많이 떨어져서) 못 사는 경우
         if current_dd <= threshold:
             needed = threshold - current_dd
-            return f"DD {current_dd*100:.2f}% (매수컷 {threshold*100:.2f}%, 필요 {needed*100:+.2f}%)"
+            return f"DD {current_dd * 100:.2f}% (매수컷 {threshold * 100:.2f}%, 필요 {needed * 100:+.2f}%)"
         return ""
 
     # 테이블 대신 세로형 카드 포맷 생성
@@ -104,7 +97,7 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
         # 세로형 출력 생성
         table_lines.append(f"📌 {sym}")
         table_lines.append(f"  상태: {st} {st_emoji}")
-        table_lines.append(f"  일간: {ret*100:+.2f}%")
+        table_lines.append(f"  일간: {ret * 100:+.2f}%")
         table_lines.append(f"  현재가: ${price:,.2f}")
         if note:
             table_lines.append(f"  비고: {note}")
@@ -117,7 +110,7 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
     }
 
 
-def write_recommend_log(report: Dict, path: Path) -> None:
+def write_recommend_log(report: dict, path: Path) -> None:
     with path.open("w", encoding="utf-8") as f:
         f.write(f"추천 로그 생성: {datetime.now().isoformat()}\n")
         f.write(f"기준일: {report['as_of']}\n\n")

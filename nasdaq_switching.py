@@ -5,21 +5,16 @@ Nasdaq Leverage Switching Strategy Recommendation Script (Standalone)
 """
 
 import itertools
-import json
 import multiprocessing
 import re
 import sys
-import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
-from pathlib import Path
-from typing import Callable, Dict, List, Tuple
 from unicodedata import east_asian_width, normalize
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
-
 
 # =============================================================================
 # 1. Settings & Config
@@ -60,7 +55,7 @@ TUNING_CONFIG = {
 }
 
 
-def load_settings() -> Dict:
+def load_settings() -> dict:
     """
     기본 설정을 로드합니다.
     """
@@ -73,7 +68,7 @@ def load_settings() -> Dict:
 # =============================================================================
 
 
-def compute_bounds(settings: Dict, end_bound: pd.Timestamp | None = None):
+def compute_bounds(settings: dict, end_bound: pd.Timestamp | None = None):
     """백테스트/튜닝/추천 모두 동일한 기간 산정 로직을 사용하도록 범위를 계산."""
     end = end_bound or pd.Timestamp.today().normalize()
     start = end - pd.DateOffset(months=settings["months_range"])
@@ -82,7 +77,7 @@ def compute_bounds(settings: Dict, end_bound: pd.Timestamp | None = None):
     return start, warmup_start, end
 
 
-def _extract_field(data: pd.DataFrame, field: str, tickers: List[str]) -> pd.DataFrame:
+def _extract_field(data: pd.DataFrame, field: str, tickers: list[str]) -> pd.DataFrame:
     """yfinance 다운로드 결과에서 특정 필드(Open/Close 등)를 안전하게 추출."""
     key = field.lower()
     if isinstance(data.columns, pd.MultiIndex):
@@ -100,9 +95,7 @@ def _extract_field(data: pd.DataFrame, field: str, tickers: List[str]) -> pd.Dat
             if level_idx is not None:
                 break
         if level_idx is None:
-            raise ValueError(
-                f"{field} 컬럼을 찾지 못했습니다. 사용 가능 컬럼: {list(data.columns)}"
-            )
+            raise ValueError(f"{field} 컬럼을 찾지 못했습니다. 사용 가능 컬럼: {list(data.columns)}")
         out = data.xs(field_key, axis=1, level=level_idx)
     else:
         candidates = [c for c in [field, field.capitalize()] if c in data.columns]
@@ -113,7 +106,7 @@ def _extract_field(data: pd.DataFrame, field: str, tickers: List[str]) -> pd.Dat
     return out
 
 
-def download_prices(settings: Dict, start) -> pd.DataFrame:
+def download_prices(settings: dict, start) -> pd.DataFrame:
     # 튜닝 시에는 모든 후보군을 다 받아야 함
     tickers = list(
         {
@@ -151,7 +144,7 @@ def download_prices(settings: Dict, start) -> pd.DataFrame:
 # =============================================================================
 
 
-def compute_signals(prices: pd.Series, settings: Dict) -> pd.DataFrame:
+def compute_signals(prices: pd.Series, settings: dict) -> pd.DataFrame:
     """가격 시계열로 추세/변동성/드로다운 신호를 계산합니다."""
     df = pd.DataFrame(index=prices.index)
     df["close"] = prices
@@ -164,7 +157,7 @@ def compute_signals(prices: pd.Series, settings: Dict) -> pd.DataFrame:
     return df.dropna()
 
 
-def pick_target(row, prev_target: str, settings: Dict) -> str:
+def pick_target(row, prev_target: str, settings: dict) -> str:
     """
     신호 행과 이전 타깃을 받아 매수 대상 티커를 결정합니다 (이중 임계값 적용).
     """
@@ -194,14 +187,14 @@ def pick_target(row, prev_target: str, settings: Dict) -> str:
 
 
 class Backtester:
-    def __init__(self, settings: Dict, prices: pd.DataFrame, signal_df: pd.DataFrame):
+    def __init__(self, settings: dict, prices: pd.DataFrame, signal_df: pd.DataFrame):
         self.settings = settings
         self.prices = prices
         self.signal_df = signal_df
         self.start_date = signal_df.index.min()
         self.end_date = signal_df.index.max()
 
-    def run(self) -> Dict:
+    def run(self) -> dict:
         """단일 백테스트 실행"""
         # 초기 자본
         initial_capital = 10_000_000
@@ -298,11 +291,9 @@ def _worker(args):
     return bt.run()
 
 
-def run_tuning(base_settings: Dict) -> Dict:
+def run_tuning(base_settings: dict) -> dict:
     """전수 조사 튜닝 실행"""
-    print(
-        f"\n[튜닝 시작] 최적 파라미터 탐색 중... (기간: {base_settings['months_range']}개월)"
-    )
+    print(f"\n[튜닝 시작] 최적 파라미터 탐색 중... (기간: {base_settings['months_range']}개월)")
 
     # 데이터 준비
     start_bound, warmup_start, end_bound = compute_bounds(base_settings)
@@ -336,10 +327,7 @@ def run_tuning(base_settings: Dict) -> Dict:
             case_settings[k] = v
 
         # 유효성 검사 (buy < sell)
-        if (
-            case_settings["drawdown_buy_cutoff"]
-            >= case_settings["drawdown_sell_cutoff"]
-        ):
+        if case_settings["drawdown_buy_cutoff"] >= case_settings["drawdown_sell_cutoff"]:
             continue
 
         tasks.append((case_settings, prices, signal_df))
@@ -365,9 +353,7 @@ def run_tuning(base_settings: Dict) -> Dict:
             completed += 1
             if completed % 100 == 0 or completed == valid_cases:
                 progress = (completed / valid_cases) * 100
-                sys.stdout.write(
-                    f"\r[튜닝 진행] {progress:.1f}% ({completed}/{valid_cases})"
-                )
+                sys.stdout.write(f"\r[튜닝 진행] {progress:.1f}% ({completed}/{valid_cases})")
                 sys.stdout.flush()
 
     print("\n[튜닝 완료] 결과 정렬 중...")
@@ -394,19 +380,17 @@ def run_tuning(base_settings: Dict) -> Dict:
 # =============================================================================
 
 
-def render_table_eaw(
-    headers: List[str], rows: List[List[str]], aligns: List[str]
-) -> List[str]:
+def render_table_eaw(headers: list[str], rows: list[list[str]], aligns: list[str]) -> list[str]:
     """
     동아시아 문자 너비를 고려하여 리스트 데이터를 ASCII 테이블 문자열로 렌더링합니다.
     """
 
-    _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+    _ansi_re = re.compile(r"\x1b\[[0-9;]*m")
 
     def _clean(s: str) -> str:
         if not isinstance(s, str):
             s = str(s)
-        s = _ANSI_RE.sub("", s)
+        s = _ansi_re.sub("", s)
         s = normalize("NFKC", s)
         return s
 
@@ -444,18 +428,14 @@ def render_table_eaw(
         else:  # 왼쪽 정렬
             return s_str + " " * pad
 
-    widths = [
-        max(_disp_width_eaw(v) for v in [headers[j]] + [r[j] for r in rows])
-        for j in range(len(headers))
-    ]
+    widths = [max(_disp_width_eaw(v) for v in [headers[j]] + [r[j] for r in rows]) for j in range(len(headers))]
 
     def _hline():
         return "+" + "+".join("-" * (w + 2) for w in widths) + "+"
 
     out = [_hline()]
     header_cells = [
-        _pad(headers[j], widths[j], "center" if aligns[j] == "center" else "left")
-        for j in range(len(headers))
+        _pad(headers[j], widths[j], "center" if aligns[j] == "center" else "left") for j in range(len(headers))
     ]
     out.append("| " + " | ".join(header_cells) + " |")
     out.append(_hline())
@@ -471,7 +451,7 @@ def render_table_eaw(
 # =============================================================================
 
 
-def run_recommend(settings: Dict) -> Dict[str, object]:
+def run_recommend(settings: dict) -> dict[str, object]:
     start_bound, warmup_start, end_bound = compute_bounds(settings)
 
     prices_full = download_prices(settings, warmup_start)
@@ -519,11 +499,7 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
 
     # 일간 수익률은 전일 대비 종가 기준
     daily_rets = prices[assets].pct_change()
-    last_ret = (
-        daily_rets.loc[last_date]
-        if last_date in daily_rets.index
-        else pd.Series(dtype=float)
-    )
+    last_ret = daily_rets.loc[last_date] if last_date in daily_rets.index else pd.Series(dtype=float)
 
     def _gap_message(row, price_today):
         # 추천 시점의 '문구'는 보통 "왜 안 샀냐"를 설명하는 용도이므로
@@ -536,7 +512,7 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
         # 드로다운이 임계값보다 낮아서(더 많이 떨어져서) 못 사는 경우
         if current_dd <= threshold:
             needed = threshold - current_dd
-            return f"DD {current_dd*100:.2f}% (매수컷 {threshold*100:.2f}%, 필요 {needed*100:+.2f}%)"
+            return f"DD {current_dd * 100:.2f}% (매수컷 {threshold * 100:.2f}%, 필요 {needed * 100:+.2f}%)"
         return ""
 
     # 테이블 대신 세로형 카드 포맷 생성
@@ -563,7 +539,7 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
         # 세로형 출력 생성
         table_lines.append(f"📌 {sym}")
         table_lines.append(f"  상태: {st} {st_emoji}")
-        table_lines.append(f"  일간: {ret*100:+.2f}%")
+        table_lines.append(f"  일간: {ret * 100:+.2f}%")
         table_lines.append(f"  현재가: ${price:,.2f}")
         if note:
             table_lines.append(f"  비고: {note}")
@@ -575,11 +551,7 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
         "table_lines": table_lines,
         "raw_data": {
             "statuses": statuses,
-            "prices": {
-                sym: prices.at[last_date, sym]
-                for sym in assets
-                if sym in prices.columns
-            },
+            "prices": {sym: prices.at[last_date, sym] for sym in assets if sym in prices.columns},
             "drawdown": last_row["drawdown"],
             "drawdown_buy_cutoff": settings["drawdown_buy_cutoff"],
             "drawdown_sell_cutoff": settings["drawdown_sell_cutoff"],
@@ -592,7 +564,7 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
 # =============================================================================
 
 
-def get_result() -> Dict:
+def get_result() -> dict:
     """
     외부에서 호출 가능한 함수.
     자동으로 튜닝을 수행하고 최적의 파라미터로 추천 결과와 튜닝 결과를 반환합니다.
@@ -657,7 +629,9 @@ def main():
         print(f"\n[INFO] 기준일: {report['as_of']}")
         print(f"[INFO] 최종 타깃: {report['target']}")
         print(
-            f"[INFO] 적용 파라미터: {settings['defense_ticker']} / Buy {settings['drawdown_buy_cutoff']}% / Sell {settings['drawdown_sell_cutoff']}%"
+            f"[INFO] 적용 파라미터: {settings['defense_ticker']} / "
+            f"Buy {settings['drawdown_buy_cutoff']}% / "
+            f"Sell {settings['drawdown_sell_cutoff']}%"
         )
 
     except Exception as e:

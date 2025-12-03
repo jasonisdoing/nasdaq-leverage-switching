@@ -2,9 +2,8 @@
 
 import json
 from pathlib import Path
-from typing import Dict, List
 
-REQUIRED_KEYS: List[str] = [
+REQUIRED_KEYS: list[str] = [
     "signal_ticker",
     "trade_ticker",
     "defense_ticker",
@@ -16,7 +15,7 @@ REQUIRED_KEYS: List[str] = [
 ]
 
 
-def load_settings(path: Path) -> Dict:
+def load_settings(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
         settings = json.load(f)
 

@@ -3,16 +3,14 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
 
 import numpy as np
 
 from logic.tune.runner import render_top_table, run_tuning
-from utils.report import render_table_eaw
 
 # 탐색 범위(필수 키만 명시, 기본값/자동 보정 없음)
 # 최근 결과를 반영해 유효 구간을 좁힌 버전
-TUNING_CONFIG: Dict[str, np.ndarray] = {
+TUNING_CONFIG: dict[str, np.ndarray] = {
     "drawdown_buy_cutoff": np.arange(0.1, 3.1, 0.1),
     "drawdown_sell_cutoff": np.arange(0.1, 3.1, 0.1),
     "defense_ticker": [
@@ -45,13 +43,13 @@ def main() -> None:
         settings = json.load(f)
     months_range = settings.get("months_range", "N")
 
-    def write_partial(results: List[Dict], completed: int, total: int) -> None:
+    def write_partial(results: list[dict], completed: int, total: int) -> None:
         # 상위 10개만 중간 저장
         results.sort(key=lambda x: x["cagr"], reverse=True)
         table_lines = render_top_table(results, top_n=10, months_range=months_range)
         with out_path.open("w", encoding="utf-8") as f:
             f.write(f"실행 시각: {start_ts.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"진행률: {completed}/{total} ({completed/total*100:.1f}%)\n\n")
+            f.write(f"진행률: {completed}/{total} ({completed / total * 100:.1f}%)\n\n")
             f.write("=== 중간 결과 - 상위 10개 ===\n")
             for line in table_lines:
                 f.write(line + "\n")
@@ -97,9 +95,7 @@ def main() -> None:
         settings_path = Path("settings.json")
         with settings_path.open("w", encoding="utf-8") as f:
             json.dump(best, f, ensure_ascii=False, indent=4)
-        print(
-            f"settings.json을 최적 파라미터로 업데이트했습니다. (backtested_date={best['backtested_date']})"
-        )
+        print(f"settings.json을 최적 파라미터로 업데이트했습니다. (backtested_date={best['backtested_date']})")
 
     table_lines = render_top_table(results, top_n=100, months_range=months_range)
 
@@ -114,9 +110,7 @@ def main() -> None:
 
         f.write("=== 튜닝 설정 ===\n")
         if meta and meta.get("period_start") and meta.get("period_end"):
-            f.write(
-                f"기간: {meta['period_start']} ~ {meta['period_end']} ({meta['period_months']} 개월)\n"
-            )
+            f.write(f"기간: {meta['period_start']} ~ {meta['period_end']} ({meta['period_months']} 개월)\n")
         else:
             f.write(f"기간: {start_ts.date()} ~ {end_ts.date()}\n")
         f.write("탐색 공간: ")

@@ -1,12 +1,9 @@
 """공통 시그널 계산 및 포지션 선택 로직."""
 
-from typing import Dict
-
-import numpy as np
 import pandas as pd
 
 
-def compute_signals(prices: pd.Series, settings: Dict) -> pd.DataFrame:
+def compute_signals(prices: pd.Series, settings: dict) -> pd.DataFrame:
     """가격 시계열로 추세/변동성/드로다운 신호를 계산합니다."""
     df = pd.DataFrame(index=prices.index)
     df["close"] = prices
@@ -19,7 +16,7 @@ def compute_signals(prices: pd.Series, settings: Dict) -> pd.DataFrame:
     return df.dropna()
 
 
-def pick_target(row, prev_target: str, settings: Dict) -> str:
+def pick_target(row, prev_target: str, settings: dict) -> str:
     """
     신호 행과 이전 타깃을 받아 매수 대상 티커를 결정합니다 (이중 임계값 적용).
 

@@ -1,24 +1,21 @@
 """튜닝 핵심 로직 (백테스트 실행·집계)."""
 
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
-from pathlib import Path
-from typing import Callable, Dict, List, Tuple
 from os import cpu_count
+from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from logic.common.settings import load_settings
+from logic.backtest.runner import run_backtest
 from logic.common.data import (
+    _extract_field,
     compute_bounds,
     download_fx,
-    download_opens,
-    download_prices,
-    _extract_field,
 )
-from logic.backtest.runner import run_backtest
+from logic.common.settings import load_settings
 from utils.report import render_table_eaw
 
 
@@ -40,14 +37,8 @@ def _is_network_or_data_error(exc: Exception) -> bool:
     return any(k in s for k in keywords)
 
 
-def _run_single(
-    args: Tuple[
-        Dict, Dict, pd.DataFrame, pd.DataFrame, pd.Series, pd.DataFrame, pd.Timestamp
-    ]
-) -> Dict:
-    base_settings, overrides, pre_prices, pre_opens, pre_fx, pre_bench, start_bound = (
-        args
-    )
+def _run_single(args: tuple[dict, dict, pd.DataFrame, pd.DataFrame, pd.Series, pd.DataFrame, pd.Timestamp]) -> dict:
+    base_settings, overrides, pre_prices, pre_opens, pre_fx, pre_bench, start_bound = args
     tuned = dict(base_settings)
     tuned.update(overrides)
     report = run_backtest(
@@ -69,13 +60,13 @@ def _run_single(
 
 
 def run_tuning(
-    tuning_config: Dict,
+    tuning_config: dict,
     months_range: int = 12,
     max_workers: int = None,
     optimization_metric: str = "CAGR",
     progress_cb: Callable[[int, int], None] = None,
-    partial_cb: Callable[[List[Dict], int, int], None] = None,
-) -> Tuple[List[Dict], Dict]:
+    partial_cb: Callable[[list[dict], int, int], None] = None,
+) -> tuple[list[dict], dict]:
     start_ts = datetime.now()
     settings = load_settings(Path("settings.json"))  # 필수 키 없으면 예외
     start_bound, warmup_start, end_bound = compute_bounds(settings)
@@ -84,9 +75,7 @@ def run_tuning(
         # 프리패치: 방어자산 후보까지 모두 포함해 한 번에 다운로드
         all_defs = list(tuning_config.get("defense_ticker", []))
         tickers = list({settings["trade_ticker"], settings["signal_ticker"], *all_defs})
-        price_raw = yf.download(
-            tickers, start=warmup_start, auto_adjust=True, progress=False
-        )
+        price_raw = yf.download(tickers, start=warmup_start, auto_adjust=True, progress=False)
         if price_raw is None or len(price_raw) == 0:
             raise ValueError(f"가격 데이터를 받아오지 못했습니다: {tickers}")
         pre_prices = _extract_field(price_raw, "Close", tickers)
@@ -102,26 +91,18 @@ def run_tuning(
                 ticker = str(b)
             if ticker:
                 bench_tickers.append(ticker)
-        bench_raw = yf.download(
-            bench_tickers, start=warmup_start, auto_adjust=True, progress=False
-        )
+        bench_raw = yf.download(bench_tickers, start=warmup_start, auto_adjust=True, progress=False)
         if bench_raw is None or len(bench_raw) == 0:
-            raise ValueError(
-                f"벤치마크 데이터를 받아오지 못했습니다: {settings['benchmarks']}"
-            )
+            raise ValueError(f"벤치마크 데이터를 받아오지 못했습니다: {settings['benchmarks']}")
         pre_bench = _extract_field(bench_raw, "Close", bench_tickers)
     except Exception as exc:
         if _is_rate_limit_error(exc):
-            raise SystemExit(
-                "yfinance YFRateLimitError: 잠시 후 다시 실행하세요."
-            ) from exc
-        raise RuntimeError(
-            f"프리패치 단계에서 데이터 로드에 실패했습니다: {exc}"
-        ) from exc
+            raise SystemExit("yfinance YFRateLimitError: 잠시 후 다시 실행하세요.") from exc
+        raise RuntimeError(f"프리패치 단계에서 데이터 로드에 실패했습니다: {exc}") from exc
 
-    combos: List[Dict] = []
-    combos: List[Dict] = []
-    combos: List[Dict] = []
+    combos: list[dict] = []
+    combos: list[dict] = []
+    combos: list[dict] = []
     for buy_cut in tuning_config["drawdown_buy_cutoff"]:
         for sell_cut in tuning_config["drawdown_sell_cutoff"]:
             # 히스테리시스 조건: buy_cutoff < sell_cutoff (절대값 기준)
@@ -141,7 +122,7 @@ def run_tuning(
 
     total_cases = len(combos)
     workers = max_workers or cpu_count() or 1
-    results: List[Dict] = []
+    results: list[dict] = []
     completed = 0
     next_progress = 1
 
@@ -192,9 +173,7 @@ def run_tuning(
     }
 
 
-def render_top_table(
-    results: List[Dict], top_n: int = 100, months_range: int | None = None
-) -> List[str]:
+def render_top_table(results: list[dict], top_n: int = 100, months_range: int | None = None) -> list[str]:
     if not months_range:
         raise ValueError("months_range must be provided")
     pr_label = f"{months_range}개월 수익률(%)"
@@ -209,7 +188,7 @@ def render_top_table(
         "Vol(%)",
     ]
     aligns = ["right"] * len(headers)
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
     for row in results[:top_n]:
         p = row["params"]
         rows.append(
@@ -217,11 +196,11 @@ def render_top_table(
                 str(p.get("defense_ticker", "")),
                 f"{p['drawdown_buy_cutoff']:.2f}",
                 f"{p['drawdown_sell_cutoff']:.2f}",
-                f"{row.get('period_return', 0.0)*100:.2f}",
-                f"{row['cagr']*100:.2f}",
-                f"{row['mdd']*100:.2f}",
+                f"{row.get('period_return', 0.0) * 100:.2f}",
+                f"{row['cagr'] * 100:.2f}",
+                f"{row['mdd'] * 100:.2f}",
                 f"{row['sharpe']:.2f}",
-                f"{row['vol']*100:.2f}",
+                f"{row['vol'] * 100:.2f}",
             ]
         )
     return render_table_eaw(headers, rows, aligns)
