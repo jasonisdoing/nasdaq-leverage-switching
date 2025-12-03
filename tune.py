@@ -18,20 +18,11 @@ TUNING_CONFIG: Dict[str, np.ndarray] = {
     "defense_ticker": [
         "SCHD",
         "SGOV",
-        "O",
-        "VOO",
-        "QQQ",
-        "SPMO",
         "SPLV",
         "DIVO",
         "JEPI",
-        "DBMF",
-        "USMV",
-        "GLD",
-        "GDX",
         "GLDM",
     ],
-    # "defense_ticker": ["SCHD", "SGOV", "O"],
 }
 
 
@@ -78,6 +69,8 @@ def main() -> None:
     try:
         results, meta = run_tuning(
             TUNING_CONFIG,
+            months_range=months_range,
+            max_workers=None,  # None -> CPU 코어 수 자동
             progress_cb=progress_cb,
             partial_cb=write_partial,
         )

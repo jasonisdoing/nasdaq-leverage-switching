@@ -69,11 +69,12 @@ def _run_single(
 
 
 def run_tuning(
-    tuning_config: Dict[str, np.ndarray],
-    *,
-    max_workers: int | None = None,
-    progress_cb: Callable[[int, int], None] | None = None,
-    partial_cb: Callable[[List[Dict], int, int], None] | None = None,
+    tuning_config: Dict,
+    months_range: int = 12,
+    max_workers: int = None,
+    optimization_metric: str = "CAGR",
+    progress_cb: Callable[[int, int], None] = None,
+    partial_cb: Callable[[List[Dict], int, int], None] = None,
 ) -> Tuple[List[Dict], Dict]:
     start_ts = datetime.now()
     settings = load_settings(Path("settings.json"))  # 필수 키 없으면 예외
@@ -183,11 +184,11 @@ def run_tuning(
     months = round((end_bound - start_bound).days / 30.0, 1)
     return results, {
         "start_ts": start_ts,
-        "total": total_cases,
-        "period_start": start_bound.date(),
-        "period_end": end_bound.date(),
-        "period_months": months,
-        "months_range": settings["months_range"],
+        "end_ts": datetime.now(),
+        "total_cases": total_cases,
+        "months": months,
+        "start_date": start_bound.strftime("%Y-%m-%d"),
+        "end_date": end_bound.strftime("%Y-%m-%d"),
     }
 
 

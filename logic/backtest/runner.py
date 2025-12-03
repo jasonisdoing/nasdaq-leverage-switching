@@ -46,7 +46,7 @@ def run_backtest(
     assets = list({offense, defense})
 
     signal_df_full = compute_signals(prices_full[settings["signal_ticker"]], settings)
-    returns_full = opens_full[assets].pct_change()
+    returns_full = opens_full[assets].pct_change(fill_method=None)
 
     common_index = (
         signal_df_full.index.intersection(prices_full.index)
