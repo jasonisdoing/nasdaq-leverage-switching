@@ -1,16 +1,24 @@
 """백테스트 실행 엔트리 포인트."""
 
+import sys
 from datetime import datetime
 from pathlib import Path
 
 from config import INITIAL_CAPITAL_KRW
 from logic.backtest.runner import run_backtest
-from logic.common.settings import load_settings
+from logic.backtest.settings import load_settings
 
 
 def main() -> None:
-    settings_path = Path("settings.json")
-    settings = load_settings(settings_path)
+    # CLI 인자로 country 지정 (기본값: us)
+    country = sys.argv[1] if len(sys.argv) > 1 else "us"
+    config_path = Path(f"config/{country}.json")
+
+    if not config_path.exists():
+        print(f"설정 파일을 찾을 수 없습니다: {config_path}")
+        return
+
+    settings = load_settings(config_path)
     try:
         report = run_backtest(settings)
     except Exception as exc:
@@ -19,12 +27,14 @@ def main() -> None:
             return
         raise
 
-    out_dir = Path("zresults")
-    out_dir.mkdir(exist_ok=True)
+    # 결과 폴더: zresults/{country}/
+    out_dir = Path(f"zresults/{country}")
+    out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"backtest_{datetime.now().date()}.log"
     with out_path.open("w", encoding="utf-8") as f:
         f.write(f"백테스트 로그 생성: {datetime.now().isoformat()}\n")
-        f.write(f"초기자본: {INITIAL_CAPITAL_KRW:,} | 시작일: {report['start']} | 종료일: {report['end']}\n\n")
+        f.write(f"마켓: {country.upper()} | 초기자본: {INITIAL_CAPITAL_KRW:,}\n")
+        f.write(f"시작일: {report['start']} | 종료일: {report['end']}\n\n")
         f.write("2. ========= 일자별 성과 ==========\n\n")
         if report.get("segment_lines"):
             f.write("=== 구간별 보유 요약 ===\n")
@@ -54,7 +64,7 @@ def main() -> None:
             for line in report["bench_table_lines"]:
                 f.write(line + "\n")
 
-    print("=== Backtest 결과 ===")
+    print(f"=== Backtest 결과 ({country.upper()}) ===")
     for k, v in report.items():
         if k == "daily_log" or k.endswith("_lines"):
             continue

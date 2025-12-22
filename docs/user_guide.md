@@ -11,67 +11,121 @@ pip install -r requirements.txt
 
 ## 2. 실행 방법
 
-### 기본 실행 (자동 튜닝 + 추천)
-가장 권장되는 실행 방법입니다. 스크립트가 알아서 최적의 파라미터를 찾고 추천을 해줍니다.
+### 워크플로우
+권장 실행 순서 (시장 인자 `us` 또는 `kor` 추가):
 
 ```bash
-python nasdaq_switching.py
+# 1. 튜닝 (최적 파라미터 탐색) → config/ 마켓별 파일 업데이트
+python tune.py kor
+
+# 2. 백테스트 (성과 검증)
+python backtest.py kor
+
+# 3. 추천 (오늘의 매매 신호)
+python recommend.py kor
+
+# 4. 추천 및 Slack 전송
+python recommend.py us --slack
 ```
 
-**실행 과정**:
-1.  **튜닝 시작**: "최적 파라미터 탐색 중..." 메시지와 함께 진행률이 표시됩니다. (약 1~2분 소요)
-2.  **결과 출력**: 튜닝이 완료되면 최적 파라미터(CAGR, MDD 등)와 추천 테이블이 출력됩니다.
+### 각 스크립트 설명
 
-### 외부 스크립트에서 사용
-다른 파이썬 스크립트나 슬랙 봇 등에서 결과를 가져다 쓰고 싶을 때 사용합니다.
+| 스크립트 | 설명 | 결과 저장 위치 |
+|----------|------|----------------|
+| `tune.py` | 최적 파라미터 탐색 | `zresults/{market}/tune_*.log` |
+| `backtest.py` | 전략 성과 분석 | `zresults/{market}/backtest_*.log` |
+| `recommend.py` | 오늘의 추천 | `zresults/{market}/recommend_*.log` |
 
-```python
-from nasdaq_switching import get_result
-
-# 튜닝 및 추천 실행
-result = get_result()
-
-# 결과 활용
-print(f"추천 종목: {result['target']}")
-print(f"최적 CAGR: {result['tuning_result']['cagr']:.2f}%")
-```
+### Slack 알림 옵션 (`--slack`)
+`recommend.py` 실행 시 `--slack` 옵션을 사용하면 설정된 Slack 채널로 추천 결과가 전송됩니다.
+- `.env` 파일에 `SLACK_BOT_TOKEN` 및 `TARGET_CHANNEL_ID`가 설정되어 있어야 합니다.
 
 ## 3. 결과 해석
 
-### 추천 테이블 예시
+### 추천 출력 예시 (KOR)
 ```text
 === 추천 목록 ===
-📌 TQQQ
+📌 418660(TIGER 미국나스닥100레버리지)
   상태: WAIT ⏳️
-  일간: +0.71%
-  현재가: $55.69
-  비고: DD -1.93% (매수컷 -0.30%, 필요 +1.63%)
+  일간: +1.03%
+  현재가: 35,350원
+  비고: DD -2.94% (매수컷 -0.30%, 필요 +2.64%)
 
-📌 GLDM
+📌 161510(PLUS 고배당주)
   상태: BUY ✅️
-  일간: -0.07%
-  현재가: $83.27
+  일간: +0.29%
+  현재가: 21,245원
   비고: 타깃
+
+
+[INFO] 기준일: 2025-12-19
+[INFO] 최종 타깃: 161510(PLUS 고배당주)
+[INFO] 적용 파라미터: 161510(PLUS 고배당주) / Buy 1.5% / Sell 2.7%
 ```
 
-- **상태 (Status)**:
-    - **BUY ✅️**: 현재 매수해야 할 종목 (타깃).
-    - **WAIT ⏳️**: 매수하지 않고 대기해야 할 종목.
-    - **HOLD**: (현금의 경우) 보유.
-- **비고 (Note)**:
-    - **타깃**: 최종적으로 선택된 종목.
-    - **DD ...**: 왜 이 종목을 사지 않았는지(또는 샀는지)에 대한 설명.
-        - 예: "매수컷 -0.30%, 필요 +1.63%" -> 현재 하락률이 -1.93%인데, 매수하려면 -0.30%까지 올라와야 하므로 1.63% 더 상승이 필요함.
+### 출력 항목 설명
 
-### 튜닝 결과 예시
-```text
-=== 🏆 최적 파라미터 (CAGR 기준) ===
-Defense Ticker : GLDM
-Buy Cutoff     : 0.3%
-Sell Cutoff    : 0.4%
-CAGR           : 91.25%
-MDD            : -11.01%
+| 항목 | 설명 |
+|------|------|
+| **상태** | `BUY ✅️` = 매수 대상, `WAIT ⏳️` = 대기 |
+| **일간** | 전일 대비 수익률 |
+| **현재가** | 최근 종가 |
+| **비고** | 타깃 여부 또는 매수 조건 설명 |
+
+### 비고(DD) 해석
 ```
-- **Defense Ticker**: 선정된 최적의 방어 자산.
-- **Buy/Sell Cutoff**: 최적의 스위칭 임계값.
-- **CAGR**: 해당 파라미터로 지난 12개월간 백테스트했을 때의 연평균 수익률.
+DD -2.94% (매수컷 -0.30%, 필요 +2.64%)
+```
+- 현재 QQQ의 고점 대비 하락률: **-2.94%**
+- 매수 전환 기준: **-0.30%** (이보다 회복되면 매수)
+- 필요 회복폭: **+2.64%** (아직 2.64% 더 올라야 매수 조건 충족)
+
+## 4. 설정 파일 (`config/us.json`, `config/kor.json`)
+
+```json
+{
+    "backtested_date": "2025-12-20",
+    "market": "us",
+    "months_range": 12,
+    "signal": {
+        "ticker": "QQQ",
+        "name": "Nasdaq 100 ETF"
+    },
+    "offense": {
+        "ticker": "TQQQ",
+        "name": "Nasdaq 3배 레버리지"
+    },
+    "defense": {
+        "ticker": "GDX",
+        "name": "반에크 금광 ETF"
+    },
+    "drawdown_buy_cutoff": 0.3,
+    "drawdown_sell_cutoff": 0.4,
+    "slippage": 0.05,
+    "benchmarks": [...]
+}
+```
+
+| 키 | 설명 |
+|----|------|
+| `backtested_date` | 마지막으로 튜닝/백테스트된 날짜 |
+| `market` | 시장 구분 (`us` 또는 `kor`) |
+| `months_range` | 백테스트 기간 (개월) |
+| `signal` | 시그널 참조 종목 객체 (ticker, name) |
+| `offense` | 공격 자산 객체 (ticker, name) |
+| `defense` | 방어 자산 객체 (ticker, name) |
+| `drawdown_buy_cutoff` | 매수 전환 기준 (%) |
+| `drawdown_sell_cutoff` | 매도 전환 기준 (%) |
+
+## 5. GitHub Actions 자동화
+매일 정해진 스케줄에 따라 서버에서 자동으로 실행되도록 설정되어 있습니다.
+
+### 스케줄 (KST 기준)
+- **오전 9:00**: 일일 데이터 마감 후 튜닝 및 추천 알림.
+- **오후 10:00**: 미국 시장 개장 전 최신 데이터 기반 추천 확인.
+
+### 필수 Secrets
+GitHub Actions 환경에서 작동하려면 Repository Secrets에 다음 항목이 등록되어야 합니다.
+- `SLACK_BOT_TOKEN`: Slack API 토큰.
+- `TARGET_CHANNEL_ID`: 알림을 받을 전용 채널 ID.
+- `LOGS_SLACK_WEBHOOK`: 코드 업데이트(Deploy) 알림용 Webhook URL.

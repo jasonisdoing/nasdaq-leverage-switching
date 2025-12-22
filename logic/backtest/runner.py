@@ -5,14 +5,14 @@ import pandas as pd
 import yfinance as yf
 
 from config import INITIAL_CAPITAL_KRW
-from logic.common.data import (
+from logic.backtest.data import (
     _extract_field,
     compute_bounds,
     download_fx,
     download_opens,
     download_prices,
 )
-from logic.common.signals import compute_signals, pick_target
+from logic.backtest.signals import compute_signals, pick_target
 from utils.report import format_kr_money, render_table_eaw
 
 
@@ -31,7 +31,7 @@ def run_backtest(
     prices_full = pre_prices.copy() if pre_prices is not None else download_prices(settings, warmup_start)
     opens_full = pre_opens.copy() if pre_opens is not None else download_opens(settings, warmup_start)
 
-    offense = settings["trade_ticker"]
+    offense = settings["offense_ticker"]
     defense = settings["defense_ticker"]
     assets = list({offense, defense})
 
@@ -58,7 +58,7 @@ def run_backtest(
     # (pick_target 내부에서 처리 필요하거나, 여기서 초기값 설정)
     # pick_target 로직상 prev_target이 None이면 offense로 가정하거나, 별도 처리 필요.
     # 여기서는 "공격 자산 보유 중"이었다고 가정하고 시작 (일반적인 백테스트 관례)
-    prev_target = settings["trade_ticker"]
+    prev_target = settings["offense_ticker"]
 
     for idx, row in signal_df.iterrows():
         tgt = pick_target(row, prev_target, settings)
@@ -67,8 +67,8 @@ def run_backtest(
 
     signal_df["target"] = targets
 
-    # 환율 데이터(원/달러)
-    fx = pre_fx.copy() if pre_fx is not None else download_fx(start_bound)
+    # 환율 데이터(원/달러) - 한국 시장은 1.0 고정
+    fx = pre_fx.copy() if pre_fx is not None else download_fx(settings, start_bound)
     fx = fx.reindex(common_index, method="ffill").dropna()
 
     # 초기 자본: 원화 -> 달러
@@ -95,13 +95,39 @@ def run_backtest(
     def _fmt_date(dt: pd.Timestamp) -> str:
         return f"{dt.date()}({weekday_map[dt.weekday()]})"
 
+    # 시장에 따른 금액 포맷
+    market = settings.get("market", "us")
+
+    def _fmt_money(val: float) -> str:
+        """시장에 따라 금액을 원화 또는 달러로 포맷."""
+        if market == "kor":
+            return format_kr_money(val)
+        else:
+            return f"${val:,.2f}"
+
+    # 티커-이름 매핑 (구간 요약에서 사용)
+    _ticker_names = {
+        settings["offense_ticker"]: settings.get("offense_name", settings["offense_ticker"]),
+        settings["defense_ticker"]: settings.get("defense_name", settings["defense_ticker"]),
+        settings["signal_ticker"]: settings.get("signal_name", settings["signal_ticker"]),
+        "CASH": "현금",
+    }
+
+    def _get_display_name(ticker: str) -> str:
+        """티커+이름 형식으로 표시."""
+        name = _ticker_names.get(ticker, ticker)
+        if name != ticker and name != "현금":
+            return f"{ticker}({name})"
+        return ticker
+
     def _add_segment(start_dt, end_dt, days, tgt, qty_val, pnl_val, pct_val):
         if start_dt is None or end_dt is None or tgt is None:
             return
-        segment_lines.append(f"[{_fmt_date(start_dt)} ~ {_fmt_date(end_dt)}] {tgt}: {days} 거래일")
+        display_name = _get_display_name(tgt)
+        segment_lines.append(f"[{_fmt_date(start_dt)} ~ {_fmt_date(end_dt)}] {display_name}: {days} 거래일")
         if tgt != "CASH":
             segment_lines.append(f" - 보유수량: {qty_val:,}")
-            segment_lines.append(f" - 손익: ${pnl_val:,.2f}")
+            segment_lines.append(f" - 손익: {_fmt_money(pnl_val)}")
             segment_lines.append(f" - 손익(%): {pct_val * 100:+.4f}%")
 
     hold_days = {s: 0 for s in assets}
@@ -254,6 +280,7 @@ def run_backtest(
         rows = []
 
         # 현금 행
+        cash_val_fmt = format_kr_money(cash_value) if market == "kor" else f"{cash_value:,.2f}"
         rows.append(
             [
                 "1",
@@ -262,9 +289,9 @@ def run_backtest(
                 "0",
                 "1",
                 "+0.0%",
-                f"{cash_value:,.2f}",
-                f"{cash_value:,.2f}",
-                "0",
+                f"{cash_value:,.0f}" if market == "kor" else f"{cash_value:,.2f}",
+                cash_val_fmt,
+                "0원" if market == "kor" else "0",
                 "+0.0%",
                 f"{cash_value / total_value:0.1%}",
                 "",
@@ -295,7 +322,7 @@ def run_backtest(
             note = ""
             if sym == target:
                 note = "타깃"
-            elif sym == settings["trade_ticker"] and state in ["WAIT", "SELL"]:
+            elif sym == settings["offense_ticker"] and state in ["WAIT", "SELL"]:
                 # Trade Ticker가 선택되지 않은 경우 드로다운 정보 표시
                 current_dd = signal_df.at[date, "drawdown"]
 
@@ -318,11 +345,11 @@ def run_backtest(
                     sym,
                     state,
                     str(hold_days[sym]),
-                    f"{price:,.2f}",
+                    f"{price:,.0f}" if market == "kor" else f"{price:,.2f}",
                     f"{ret:+.2%}",
                     f"{qty_disp:,.0f}",
-                    f"{position_value:,.2f}",
-                    f"{eval_pnl:,.2f}",
+                    format_kr_money(position_value) if market == "kor" else f"{position_value:,.2f}",
+                    format_kr_money(eval_pnl) if market == "kor" else f"{eval_pnl:,.2f}",
                     f"{eval_pct * 100:+.2f}%",
                     f"{weight:0.0%}",
                     note,
@@ -332,11 +359,17 @@ def run_backtest(
 
         table_lines = render_table_eaw(headers, rows, aligns)
 
-        header_line = (
-            f"{date.date()} | 목표: {target} | 총자산: ${total_value:,.2f} "
-            f"({format_kr_money(krw_value)}) | 일간수익률: {daily_ret:+.2%} | "
-            f"누적수익률: {(total_value / initial_capital_usd - 1):+.2%}"
-        )
+        if market == "kor":
+            header_line = (
+                f"{date.date()} | 목표: {target} | 총자산: {format_kr_money(krw_value)} | "
+                f"일간수익률: {daily_ret:+.2%} | 누적수익률: {(total_value / initial_capital_usd - 1):+.2%}"
+            )
+        else:
+            header_line = (
+                f"{date.date()} | 목표: {target} | 총자산: ${total_value:,.2f} "
+                f"({format_kr_money(krw_value)}) | 일간수익률: {daily_ret:+.2%} | "
+                f"누적수익률: {(total_value / initial_capital_usd - 1):+.2%}"
+            )
 
         daily_log.append(header_line)
         daily_log.extend(table_lines)
@@ -384,8 +417,30 @@ def run_backtest(
         if pre_bench is not None:
             bench_prices = pre_bench.copy()
         else:
-            bench_raw = yf.download(bench_tickers, start=start_bound, auto_adjust=True, progress=False)
-            bench_prices = _extract_field(bench_raw, "Close", bench_tickers)
+            # 시장에 따라 데이터 소스 분기
+            market = settings.get("market", "us")
+            if market == "kor":
+                # 한국: pykrx 사용
+                try:
+                    from pykrx import stock as pykrx_stock
+                except ImportError:
+                    raise ImportError("pykrx 패키지가 설치되어 있지 않습니다.")
+                start_str = start_bound.strftime("%Y%m%d")
+                end_str = pd.Timestamp.today().strftime("%Y%m%d")
+                bench_dfs = {}
+                for ticker in bench_tickers:
+                    df = pykrx_stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
+                    if df is not None and not df.empty:
+                        bench_dfs[ticker] = df["종가"]
+                if bench_dfs:
+                    bench_prices = pd.DataFrame(bench_dfs)
+                    bench_prices.index = pd.to_datetime(bench_prices.index)
+                else:
+                    bench_prices = pd.DataFrame()
+            else:
+                # 미국: yfinance 사용
+                bench_raw = yf.download(bench_tickers, start=start_bound, auto_adjust=True, progress=False)
+                bench_prices = _extract_field(bench_raw, "Close", bench_tickers)
         bench_prices = bench_prices.reindex(equity_series.index, method="ffill")
         for b in bench_info:
             t = b["ticker"]
@@ -434,7 +489,13 @@ def run_backtest(
     )
 
     # 전략 vs 벤치마크 비교 테이블
-    strat_label = f"{settings['trade_ticker']}<->{settings['defense_ticker']}"
+    trade_display = settings["offense_ticker"]
+    defense_display = settings["defense_ticker"]
+    if settings.get("offense_name") and settings["offense_name"] != settings["offense_ticker"]:
+        trade_display = f"{settings['offense_ticker']}({settings['offense_name']})"
+    if settings.get("defense_name") and settings["defense_name"] != settings["defense_ticker"]:
+        defense_display = f"{settings['defense_ticker']}({settings['defense_name']})"
+    strat_label = f"{trade_display}<->{defense_display}"
     perf_rows = [
         [
             "1",
@@ -490,8 +551,20 @@ def run_backtest(
         )
 
     # 종목별 성과 요약
+    # 티커+이름 매핑
+    ticker_names = {
+        settings["offense_ticker"]: settings.get("offense_name", settings["offense_ticker"]),
+        settings["defense_ticker"]: settings.get("defense_name", settings["defense_ticker"]),
+        settings["signal_ticker"]: settings.get("signal_name", settings["signal_ticker"]),
+        "CASH": "현금",
+    }
+
     asset_rows = []
     for idx, sym in enumerate(["CASH"] + assets, start=1):
+        # 티커+이름 표시
+        name = ticker_names.get(sym, sym)
+        display_name = f"{sym}({name})" if name != sym and name != "현금" else sym
+
         if sym == "CASH":
             pnl_usd = 0.0
             days = 0
@@ -508,7 +581,7 @@ def run_backtest(
         asset_rows.append(
             [
                 str(idx),
-                sym,
+                display_name,
                 f"{pnl_usd:,.2f}",
                 f"{pnl_usd:,.2f}",
                 format_kr_money(krw_pnl),
@@ -610,10 +683,29 @@ def run_backtest(
         f"| buy_cutoff: {settings['drawdown_buy_cutoff']}%",
         f"| sell_cutoff: {settings['drawdown_sell_cutoff']}%",
         f"| signal_ticker: {settings['signal_ticker']}",
-        f"| trade_ticker: {settings['trade_ticker']}",
+        f"| offense_ticker: {settings['offense_ticker']}",
         f"| defense_ticker: {settings['defense_ticker']}",
         f"| slippage: {settings['slippage']}%",
     ]
+
+    # 추천용 추가 데이터 (마지막 날 정보)
+    last_date = signal_df.index[-1]
+    last_row = signal_df.iloc[-1]
+    last_prices = {sym: prices_full.at[last_date, sym] for sym in assets if sym in prices_full.columns}
+    last_returns = returns.iloc[-1] if not returns.empty else {}
+    current_drawdown = last_row["drawdown"]
+    buy_cutoff = -settings["drawdown_buy_cutoff"] / 100
+    needed_recovery = buy_cutoff - current_drawdown if current_drawdown < buy_cutoff else 0
+
+    recommendation_data = {
+        "last_date": last_date.date().isoformat(),
+        "last_prices": last_prices,
+        "last_returns": {sym: last_returns.get(sym, 0.0) for sym in assets},
+        "current_drawdown": current_drawdown,
+        "buy_cutoff": settings["drawdown_buy_cutoff"],
+        "sell_cutoff": settings["drawdown_sell_cutoff"],
+        "needed_recovery": needed_recovery * 100,  # 퍼센트로 변환
+    }
 
     return {
         "start": start_date.isoformat(),
@@ -637,4 +729,5 @@ def run_backtest(
         "bench_error": bench_error,
         "used_settings_lines": used_settings_lines,
         "segment_lines": segment_lines,
+        "recommendation_data": recommendation_data,
     }

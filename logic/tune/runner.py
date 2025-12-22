@@ -9,14 +9,20 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
-from logic.backtest.runner import run_backtest
-from logic.common.data import (
+from logic.backtest.data import (
     _extract_field,
     compute_bounds,
     download_fx,
 )
-from logic.common.settings import load_settings
+from logic.backtest.runner import run_backtest
+from logic.backtest.settings import load_settings
 from utils.report import render_table_eaw
+
+# pykrx는 한국 시장에서만 사용
+try:
+    from pykrx import stock as pykrx_stock
+except ImportError:
+    pykrx_stock = None
 
 
 def _is_rate_limit_error(exc: Exception) -> bool:
@@ -35,6 +41,66 @@ def _is_network_or_data_error(exc: Exception) -> bool:
         "가격 데이터를 받아오지 못했습니다",
     ]
     return any(k in s for k in keywords)
+
+
+def _validate_defense_data_kor(tuning_config: dict, start_bound) -> list[str]:
+    """한국 시장 defense 티커 데이터 가용성 검증 (백테스트 시작일 기준)."""
+    if pykrx_stock is None:
+        raise ImportError("pykrx 패키지가 설치되어 있지 않습니다. pip install pykrx")
+
+    raw_defs = tuning_config.get("defense", [])
+    start_str = pd.Timestamp(start_bound).strftime("%Y%m%d")
+    end_str = pd.Timestamp.today().strftime("%Y%m%d")
+
+    errors = []
+    for d in raw_defs:
+        if isinstance(d, dict):
+            ticker = d.get("ticker", "")
+            name = d.get("name", ticker)
+        else:
+            ticker = str(d)
+            name = ticker
+
+        df = pykrx_stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
+        if df is None or df.empty:
+            errors.append(f"  - {ticker}({name}): 데이터 없음")
+        else:
+            data_start = df.index[0].strftime("%Y-%m-%d")
+            # start_bound가 주말/휴일일 수 있으므로 첫 영업일 기준으로 비교
+            # 데이터 시작일이 start_bound + 5영업일 이후면 오류
+            adjusted_start = pd.Timestamp(start_bound) + pd.offsets.BDay(5)
+            if df.index[0] > adjusted_start:
+                required_start = pd.Timestamp(start_bound).strftime("%Y-%m-%d")
+                errors.append(f"  - {ticker}({name}): 데이터 시작일 {data_start} (필요: {required_start})")
+
+    return errors
+
+
+def _validate_defense_data_us(tuning_config: dict, start_bound) -> list[str]:
+    """미국 시장 defense 티커 데이터 가용성 검증 (백테스트 시작일 기준)."""
+    raw_defs = tuning_config.get("defense", [])
+
+    errors = []
+    for d in raw_defs:
+        if isinstance(d, dict):
+            ticker = d.get("ticker", "")
+            name = d.get("name", ticker)
+        else:
+            ticker = str(d)
+            name = ticker
+
+        df = yf.download(ticker, start=start_bound, auto_adjust=True, progress=False)
+        if df is None or df.empty:
+            errors.append(f"  - {ticker}({name}): 데이터 없음")
+        else:
+            data_start = df.index[0].strftime("%Y-%m-%d")
+            # start_bound가 주말/휴일일 수 있으므로 첫 영업일 기준으로 비교
+            # 데이터 시작일이 start_bound + 5영업일 이후면 오류
+            adjusted_start = pd.Timestamp(start_bound) + pd.offsets.BDay(5)
+            if df.index[0] > adjusted_start:
+                required_start = pd.Timestamp(start_bound).strftime("%Y-%m-%d")
+                errors.append(f"  - {ticker}({name}): 데이터 시작일 {data_start} (필요: {required_start})")
+    return errors
 
 
 def _run_single(args: tuple[dict, dict, pd.DataFrame, pd.DataFrame, pd.Series, pd.DataFrame, pd.Timestamp]) -> dict:
@@ -59,8 +125,117 @@ def _run_single(args: tuple[dict, dict, pd.DataFrame, pd.DataFrame, pd.Series, p
     }
 
 
+def _prefetch_data_us(settings: dict, tuning_config: dict, warmup_start):
+    """미국 시장 데이터 프리패치 (yfinance)."""
+    # defense_ticker가 {ticker, name} 형식일 수 있으므로 티커만 추출
+    raw_defs = tuning_config.get("defense", [])
+    all_defs = []
+    for d in raw_defs:
+        if isinstance(d, dict):
+            all_defs.append(d.get("ticker", ""))
+        else:
+            all_defs.append(str(d))
+    tickers = list({settings["offense_ticker"], settings["signal_ticker"], *all_defs})
+    price_raw = yf.download(tickers, start=warmup_start, auto_adjust=True, progress=False)
+    if price_raw is None or len(price_raw) == 0:
+        raise ValueError(f"가격 데이터를 받아오지 못했습니다: {tickers}")
+    pre_prices = _extract_field(price_raw, "Close", tickers)
+    pre_opens = _extract_field(price_raw, "Open", tickers)
+
+    pre_fx = download_fx(settings, warmup_start)
+
+    bench_raw_entries = settings.get("benchmarks", [])
+    bench_tickers = []
+    for b in bench_raw_entries:
+        if isinstance(b, dict):
+            ticker = b.get("ticker")
+        else:
+            ticker = str(b)
+        if ticker:
+            bench_tickers.append(ticker)
+
+    if bench_tickers:
+        bench_raw = yf.download(bench_tickers, start=warmup_start, auto_adjust=True, progress=False)
+        if bench_raw is None or len(bench_raw) == 0:
+            pre_bench = pd.DataFrame()
+        else:
+            pre_bench = _extract_field(bench_raw, "Close", bench_tickers)
+    else:
+        pre_bench = pd.DataFrame()
+
+    return pre_prices, pre_opens, pre_fx, pre_bench
+
+
+def _prefetch_data_kor(settings: dict, tuning_config: dict, warmup_start):
+    """한국 시장 데이터 프리패치 (pykrx)."""
+    if pykrx_stock is None:
+        raise ImportError("pykrx 패키지가 설치되어 있지 않습니다. pip install pykrx")
+
+    # defense_ticker가 {ticker, name} 형식일 수 있으므로 티커만 추출
+    raw_defs = tuning_config.get("defense", [])
+    all_defs = []
+    for d in raw_defs:
+        if isinstance(d, dict):
+            all_defs.append(d.get("ticker", ""))
+        else:
+            all_defs.append(str(d))
+    tickers = list({settings["offense_ticker"], settings["signal_ticker"], *all_defs})
+
+    start_str = pd.Timestamp(warmup_start).strftime("%Y%m%d")
+    end_str = pd.Timestamp.today().strftime("%Y%m%d")
+
+    # 종가
+    price_dfs = {}
+    open_dfs = {}
+    for ticker in tickers:
+        df = pykrx_stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
+        if df is not None and not df.empty:
+            price_dfs[ticker] = df["종가"]
+            open_dfs[ticker] = df["시가"]
+
+    if not price_dfs:
+        raise ValueError(f"가격 데이터를 받아오지 못했습니다: {tickers}")
+
+    pre_prices = pd.DataFrame(price_dfs)
+    pre_prices.index = pd.to_datetime(pre_prices.index)
+
+    pre_opens = pd.DataFrame(open_dfs)
+    pre_opens.index = pd.to_datetime(pre_opens.index)
+
+    # 한국은 환율 불필요 (원화 기준)
+    pre_fx = download_fx(settings, warmup_start)
+
+    # 벤치마크
+    bench_raw_entries = settings.get("benchmarks", [])
+    bench_tickers = []
+    for b in bench_raw_entries:
+        if isinstance(b, dict):
+            ticker = b.get("ticker")
+        else:
+            ticker = str(b)
+        if ticker:
+            bench_tickers.append(ticker)
+
+    if bench_tickers:
+        bench_dfs = {}
+        for ticker in bench_tickers:
+            df = pykrx_stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
+            if df is not None and not df.empty:
+                bench_dfs[ticker] = df["종가"]
+        if bench_dfs:
+            pre_bench = pd.DataFrame(bench_dfs)
+            pre_bench.index = pd.to_datetime(pre_bench.index)
+        else:
+            pre_bench = pd.DataFrame()
+    else:
+        pre_bench = pd.DataFrame()
+
+    return pre_prices, pre_opens, pre_fx, pre_bench
+
+
 def run_tuning(
     tuning_config: dict,
+    config_path: Path = None,
     months_range: int = 12,
     max_workers: int = None,
     optimization_metric: str = "CAGR",
@@ -68,55 +243,64 @@ def run_tuning(
     partial_cb: Callable[[list[dict], int, int], None] = None,
 ) -> tuple[list[dict], dict]:
     start_ts = datetime.now()
-    settings = load_settings(Path("settings.json"))  # 필수 키 없으면 예외
+
+    # config_path가 주어지면 해당 파일 사용, 아니면 기본값
+    if config_path is None:
+        config_path = Path("config/us.json")
+    settings = load_settings(config_path)
+
+    market = settings.get("market", "us")
     start_bound, warmup_start, end_bound = compute_bounds(settings)
 
-    try:
-        # 프리패치: 방어자산 후보까지 모두 포함해 한 번에 다운로드
-        all_defs = list(tuning_config.get("defense_ticker", []))
-        tickers = list({settings["trade_ticker"], settings["signal_ticker"], *all_defs})
-        price_raw = yf.download(tickers, start=warmup_start, auto_adjust=True, progress=False)
-        if price_raw is None or len(price_raw) == 0:
-            raise ValueError(f"가격 데이터를 받아오지 못했습니다: {tickers}")
-        pre_prices = _extract_field(price_raw, "Close", tickers)
-        pre_opens = _extract_field(price_raw, "Open", tickers)
+    # 튜닝 시작 전 defense 티커 데이터 가용성 검증 (백테스트 시작일 기준)
+    print("[데이터 검증] defense 티커 데이터 가용성 확인 중...")
+    if market == "kor":
+        validation_errors = _validate_defense_data_kor(tuning_config, start_bound)
+    else:
+        validation_errors = _validate_defense_data_us(tuning_config, start_bound)
 
-        pre_fx = download_fx(warmup_start)
-        bench_raw_entries = settings["benchmarks"]
-        bench_tickers = []
-        for b in bench_raw_entries:
-            if isinstance(b, dict):
-                ticker = b.get("ticker")
-            else:
-                ticker = str(b)
-            if ticker:
-                bench_tickers.append(ticker)
-        bench_raw = yf.download(bench_tickers, start=warmup_start, auto_adjust=True, progress=False)
-        if bench_raw is None or len(bench_raw) == 0:
-            raise ValueError(f"벤치마크 데이터를 받아오지 못했습니다: {settings['benchmarks']}")
-        pre_bench = _extract_field(bench_raw, "Close", bench_tickers)
+    if validation_errors:
+        required_date = pd.Timestamp(start_bound).strftime("%Y-%m-%d")
+        error_msg = (
+            f"\n❌ 튜닝을 중단합니다: 일부 defense 티커에 {required_date}부터의 데이터가 없습니다.\n"
+            f"\n문제가 있는 티커:\n" + "\n".join(validation_errors) + f"\n\n해결 방법:\n"
+            f"  1. tune.py의 TUNING_CONFIG에서 해당 티커를 제거하거나\n"
+            f"  2. config/{market}.json의 months_range를 줄여서 더 최근 기간만 사용하세요.\n"
+        )
+        raise ValueError(error_msg)
+    print("[데이터 검증] 모든 defense 티커 데이터 확인 완료 ✅")
+
+    try:
+        if market == "kor":
+            pre_prices, pre_opens, pre_fx, pre_bench = _prefetch_data_kor(settings, tuning_config, warmup_start)
+        else:
+            pre_prices, pre_opens, pre_fx, pre_bench = _prefetch_data_us(settings, tuning_config, warmup_start)
     except Exception as exc:
         if _is_rate_limit_error(exc):
             raise SystemExit("yfinance YFRateLimitError: 잠시 후 다시 실행하세요.") from exc
         raise RuntimeError(f"프리패치 단계에서 데이터 로드에 실패했습니다: {exc}") from exc
 
     combos: list[dict] = []
-    combos: list[dict] = []
-    combos: list[dict] = []
     for buy_cut in tuning_config["drawdown_buy_cutoff"]:
         for sell_cut in tuning_config["drawdown_sell_cutoff"]:
             # 히스테리시스 조건: buy_cutoff < sell_cutoff (절대값 기준)
-            # 예: buy=1.0, sell=2.0 -> OK
-            # 예: buy=2.0, sell=1.0 -> Invalid (이미 팔았는데 사야 함? 논리적 모순)
             if buy_cut >= sell_cut:
                 continue
 
-            for def_t in tuning_config["defense_ticker"]:
+            for def_t in tuning_config["defense"]:
+                # defense_ticker가 {ticker, name} 형식이면 티커만 추출
+                if isinstance(def_t, dict):
+                    ticker = def_t.get("ticker", "")
+                    defense_obj = def_t  # 전체 객체 저장
+                else:
+                    ticker = str(def_t)
+                    defense_obj = {"ticker": ticker, "name": ticker}
                 combos.append(
                     {
                         "drawdown_buy_cutoff": float(buy_cut),
                         "drawdown_sell_cutoff": float(sell_cut),
-                        "defense_ticker": str(def_t),
+                        "defense_ticker": ticker,
+                        "_defense_obj": defense_obj,  # 전체 객체 저장 (결과에 포함용)
                     }
                 )
 
@@ -168,14 +352,22 @@ def run_tuning(
         "end_ts": datetime.now(),
         "total_cases": total_cases,
         "months": months,
-        "start_date": start_bound.strftime("%Y-%m-%d"),
-        "end_date": end_bound.strftime("%Y-%m-%d"),
+        "period_start": start_bound.strftime("%Y-%m-%d"),
+        "period_end": end_bound.strftime("%Y-%m-%d"),
+        "period_months": months_range,
     }
 
 
-def render_top_table(results: list[dict], top_n: int = 100, months_range: int | None = None) -> list[str]:
+def render_top_table(
+    results: list[dict],
+    top_n: int = 100,
+    months_range: int | None = None,
+    defense_names: dict[str, str] | None = None,
+) -> list[str]:
     if not months_range:
         raise ValueError("months_range must be provided")
+    if defense_names is None:
+        defense_names = {}
     pr_label = f"{months_range}개월 수익률(%)"
     headers = [
         "defense_ticker",
@@ -191,9 +383,17 @@ def render_top_table(results: list[dict], top_n: int = 100, months_range: int | 
     rows: list[list[str]] = []
     for row in results[:top_n]:
         p = row["params"]
+        ticker = str(p.get("defense_ticker", ""))
+        # _defense_obj가 있으면 그것에서 이름을 가져오고, 없으면 defense_names에서 가져옴
+        defense_obj = p.get("_defense_obj")
+        if defense_obj and isinstance(defense_obj, dict):
+            name = defense_obj.get("name", "")
+        else:
+            name = defense_names.get(ticker, "") if defense_names else ""
+        display = f"{ticker}({name})" if name else ticker
         rows.append(
             [
-                str(p.get("defense_ticker", "")),
+                display,
                 f"{p['drawdown_buy_cutoff']:.2f}",
                 f"{p['drawdown_sell_cutoff']:.2f}",
                 f"{row.get('period_return', 0.0) * 100:.2f}",

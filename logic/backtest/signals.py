@@ -26,7 +26,7 @@ def pick_target(row, prev_target: str, settings: dict) -> str:
     buy_cut = -settings["drawdown_buy_cutoff"] / 100
     sell_cut = -settings["drawdown_sell_cutoff"] / 100
 
-    offense = settings["trade_ticker"]
+    offense = settings["offense_ticker"]
     defense = settings["defense_ticker"]
 
     current_dd = row["drawdown"]
