@@ -1,19 +1,19 @@
-"""추천 실행 엔트리 포인트.
-
-백테스트 결과의 마지막 날 데이터를 "오늘의 추천"으로 출력합니다.
-"""
-
-import sys
+import argparse
 from datetime import datetime
 from pathlib import Path
 
 from logic.backtest.runner import run_backtest
 from logic.backtest.settings import load_settings
+from utils.slack import send_slack_recommendation
 
 
 def main() -> None:
-    # CLI 인자로 country 지정 (기본값: us)
-    country = sys.argv[1] if len(sys.argv) > 1 else "us"
+    parser = argparse.ArgumentParser(description="추천 실행 엔트리 포인트")
+    parser.add_argument("country", nargs="?", default="us", help="대상 국가 (us/kor)")
+    parser.add_argument("--slack", action="store_true", help="결과를 Slack으로 전송")
+    args = parser.parse_args()
+
+    country = args.country
     config_path = Path(f"config/{country}.json")
 
     if not config_path.exists():
@@ -107,15 +107,23 @@ def main() -> None:
         f.write(f"[INFO] 최종 타깃: {target_display}\n")
         f.write(f"[INFO] 적용 파라미터: {defense_ticker} / Buy {buy_cutoff}% / Sell {sell_cutoff}%\n")
 
-    # 콘솔 출력
-    print(f"\n=== 추천 목록 ({country.upper()}) ===")
-    for line in table_lines:
-        print(line)
-    print()
-    print(f"[INFO] 기준일: {end_date}")
-    print(f"[INFO] 최종 타깃: {target_display}")
-    print(f"[INFO] 적용 파라미터: {defense_ticker} / Buy {buy_cutoff}% / Sell {sell_cutoff}%")
     print(f"\n추천 결과 저장: {out_path}")
+
+    # Slack 알림 전송
+    if args.slack:
+        tuning_meta = {
+            "defense_ticker": settings["defense_ticker"],
+            "buy_cutoff": buy_cutoff,
+            "sell_cutoff": sell_cutoff,
+            "cagr": result.get("cagr", 0.0),
+        }
+        send_slack_recommendation(
+            country=country,
+            as_of=end_date,
+            target_display=target_display,
+            table_lines=table_lines,
+            tuning_meta=tuning_meta,
+        )
 
 
 if __name__ == "__main__":

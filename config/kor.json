@@ -1,7 +1,7 @@
 {
     "backtested_date": "2025-12-22",
     "market": "kor",
-    "months_range": 24,
+    "months_range": 12,
     "signal": {
         "ticker": "379810",
         "name": "KODEX 미국나스닥100"
@@ -11,12 +11,12 @@
         "name": "TIGER 미국나스닥100레버리지"
     },
     "defense": {
-        "ticker": "161510",
-        "name": "PLUS 고배당주"
+        "ticker": "489250",
+        "name": "KODEX 미국배당다우존스"
     },
     "slippage": 0.25,
-    "drawdown_buy_cutoff": 1.5,
-    "drawdown_sell_cutoff": 2.7,
+    "drawdown_buy_cutoff": 1.0,
+    "drawdown_sell_cutoff": 1.1,
     "benchmarks": [
         {
             "ticker": "441640",

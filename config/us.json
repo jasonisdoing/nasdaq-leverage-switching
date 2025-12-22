@@ -11,8 +11,8 @@
         "name": "Nasdaq 3배 레버리지"
     },
     "defense": {
-        "ticker": "GDX",
-        "name": "반에크 금광 ETF"
+        "ticker": "SPLV",
+        "name": "인베스코 S&P500 저변동 ETF"
     },
     "slippage": 0.05,
     "drawdown_buy_cutoff": 0.3,
