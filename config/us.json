@@ -1,5 +1,5 @@
 {
-    "backtested_date": "2026-01-13",
+    "backtested_date": "2026-01-14",
     "market": "us",
     "months_range": 12,
     "signal": {
@@ -11,12 +11,12 @@
         "name": "Nasdaq 3배 레버리지"
     },
     "defense": {
-        "ticker": "SPLV",
-        "name": "인베스코 S&P500 저변동 ETF"
+        "ticker": "DJD",
+        "name": "인베스코 다우 존스 산업 평균 배당주 ETF"
     },
     "slippage": 0.05,
     "drawdown_buy_cutoff": 0.3,
-    "drawdown_sell_cutoff": 0.4,
+    "drawdown_sell_cutoff": 0.5,
     "benchmarks": [
         {
             "ticker": "SPMO",
