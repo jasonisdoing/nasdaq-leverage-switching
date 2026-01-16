@@ -1,5 +1,5 @@
 {
-    "backtested_date": "2026-01-15",
+    "backtested_date": "2026-01-16",
     "market": "us",
     "months_range": 12,
     "signal": {
@@ -11,8 +11,8 @@
         "name": "Nasdaq 3배 레버리지"
     },
     "defense": {
-        "ticker": "SPLV",
-        "name": "인베스코 S&P500 저변동 ETF"
+        "ticker": "SPHD",
+        "name": "인베스코 고배당 저변동 ETF"
     },
     "slippage": 0.05,
     "drawdown_buy_cutoff": 0.3,
