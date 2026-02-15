@@ -46,7 +46,7 @@ def send_slack_recommendation(
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"{market_name} 나스닥 스위칭 전략 추천",
+                "text": f"{market_name} 스위칭 전략 추천",
                 "emoji": True,
             },
         }

@@ -1,10 +1,10 @@
-name: Daily Nasdaq Switching Recommendation
+name: Daily Recommendation (US)
 
 on:
   schedule:
-    # 매일 UTC 00:00 (한국 시간 오전 9:00) 실행
-    - cron: '0 0 * * *'
-    # 매일 UTC 13:00 (한국 시간 오후 10:00) 실행
+    # 매일 UTC 21:00 (한국 시간 오전 6:00) 실행 - 미국 장 마감 후
+    - cron: '0 21 * * *'
+    # 매일 UTC 13:00 (한국 시간 오후 10:00) 실행 - 미국 장 시작 전
     - cron: '0 13 * * *'
   workflow_dispatch: # 수동 실행 활성화
 
@@ -42,6 +42,6 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add config/*.json
+          git add config/us.json
           git status
-          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update optimal parameters [skip ci]" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore(us): update optimal parameters [skip ci]" && git push)

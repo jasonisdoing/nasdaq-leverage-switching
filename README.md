@@ -59,10 +59,17 @@ python recommend.py us --slack  # 실행 후 Slack 전송
 ```
 
 ## 6. 자동화 (Automation)
-이 프로젝트는 GitHub Actions를 통해 매일 2회(**오전 9시, 오후 10시 KST**) 자동으로 실행됩니다.
-- **Tuning**: 최신 시장 데이터를 반영하여 마켓별 최적 파라미터 업데이트.
-- **Recommendation**: 현재 포지션 추천 및 Slack 알림 전송.
-- **Version Check**: 코드 업데이트 시 `APP_VERSION` 정보와 함께 성공 여부 알림.
+이 프로젝트는 GitHub Actions를 통해 시장별로 최적화된 스케줄에 따라 자동으로 실행됩니다.
+
+- **🇺🇸 미국 시장 (`daily_us.yml`)**
+    - **오전 06:00 (KST)**: 장 마감 후 튜닝 및 추천
+    - **오후 10:00 (KST)**: 장 시작 전 최신 데이터 확인
+
+- **🇰🇷 한국 시장 (`daily_kor.yml`)**
+    - **오전 09:00 (KST)**: 장 시작 시점 튜닝 및 추천
+    - **오후 03:00 (KST)**: 장 마감 임박 시점 확인
+
+각 워크플로우는 튜닝(Tuning), 추천(Recommendation), Slack 알림(Notification), 그리고 설정 자동 커밋(Auto-Commit)을 수행합니다.
 
 ## ⚠️ 면책 조항 (Disclaimer)
 이 소프트웨어는 투자를 돕기 위한 보조 도구입니다. **최종적인 투자 결정과 그에 따른 책임은 전적으로 사용자에게 있습니다.** 개발자는 이 프로그램을 사용하여 발생한 금전적 손실에 대해 책임지지 않습니다.

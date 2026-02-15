@@ -1,50 +1,38 @@
 {
-    "backtested_date": "2025-12-22",
+    "backtested_date": "2026-02-15",
     "market": "kor",
-    "months_range": 12,
+    "months_range": 6,
     "signal": {
-        "ticker": "379810",
-        "name": "KODEX 미국나스닥100"
+        "ticker": "226490",
+        "name": "KODEX 코스피"
     },
     "offense": {
-        "ticker": "418660",
-        "name": "TIGER 미국나스닥100레버리지"
+        "ticker": "122630",
+        "name": "KODEX 레버리지"
     },
     "defense": {
-        "ticker": "489250",
-        "name": "KODEX 미국배당다우존스"
+        "ticker": "161510",
+        "name": "PLUS 고배당주"
     },
     "slippage": 0.25,
-    "drawdown_buy_cutoff": 1.0,
-    "drawdown_sell_cutoff": 1.1,
+    "drawdown_buy_cutoff": 1.7,
+    "drawdown_sell_cutoff": 1.8,
     "benchmarks": [
         {
-            "ticker": "441640",
-            "name": "KODEX 미국배당커버드콜액티브"
+            "ticker": "226490",
+            "name": "KODEX 코스피"
         },
         {
-            "ticker": "379800",
-            "name": "KODEX 미국S&P500"
+            "ticker": "069500",
+            "name": "KODEX 200"
         },
         {
-            "ticker": "379810",
-            "name": "KODEX 미국나스닥100"
-        },
-        {
-            "ticker": "418660",
-            "name": "TIGER 미국나스닥100레버리지"
-        },
-        {
-            "ticker": "473640",
-            "name": "HANARO 글로벌금채굴기업"
+            "ticker": "122630",
+            "name": "KODEX 레버리지"
         },
         {
             "ticker": "161510",
             "name": "PLUS 고배당주"
-        },
-        {
-            "ticker": "461490",
-            "name": "RISE 글로벌자산배분액티브"
         }
     ]
 }

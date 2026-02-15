@@ -32,10 +32,10 @@ TUNING_CONFIG: dict[str, dict] = {
             # {"ticker": "379800", "name": "KODEX 미국배당커버드콜액티브"},
             # {"ticker": "379800", "name": "KODEX 미국S&P500"},
             # {"ticker": "379810", "name": "KODEX 미국나스닥100"},
-            # {"ticker": "161510", "name": "PLUS 고배당주"},
+            {"ticker": "161510", "name": "PLUS 고배당주"},
             # {"ticker": "475350", "name": "RISE 버크셔포트폴리오TOP10"},
             # {"ticker": "473640", "name": "HANARO 글로벌금채굴기업"},
-            {"ticker": "489250", "name": "KODEX 미국배당다우존스"},
+            # {"ticker": "489250", "name": "KODEX 미국배당다우존스"},
         ],
     },
 }
