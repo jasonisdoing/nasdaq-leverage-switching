@@ -15,8 +15,8 @@
         "name": "슈왑 미국 배당주 ETF"
     },
     "slippage": 0.25,
-    "drawdown_buy_cutoff": 0.1,
-    "drawdown_sell_cutoff": 2.6,
+    "drawdown_buy_cutoff": 0.3,
+    "drawdown_sell_cutoff": 0.5,
     "benchmarks": [
         {
             "ticker": "SPMO",

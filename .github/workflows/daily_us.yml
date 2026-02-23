@@ -29,7 +29,11 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Tuning (US)
-        run: python tune.py us
+        run: |
+          CURRENT_HOUR=$(date +%H)
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] || [ "$CURRENT_HOUR" == "13" ]; then
+            python tune.py us
+          fi
 
       - name: Run Recommendation (US) and Send Slack
         env:
