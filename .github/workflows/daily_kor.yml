@@ -28,7 +28,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Set Current Hour
+        run: echo "CURRENT_HOUR=$(date +%H)" >> $GITHUB_ENV
+
       - name: Run Tuning (KOR)
+        if: github.event_name == 'workflow_dispatch' || env.CURRENT_HOUR == '23'
         run: python tune.py kor
 
       - name: Run Recommendation (KOR) and Send Slack
