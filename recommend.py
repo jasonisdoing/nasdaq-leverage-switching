@@ -99,7 +99,8 @@ def main() -> None:
     defense_name = settings.get("defense_name", defense_ticker)
 
     last_prices = rec_data["last_prices"]
-    last_returns = rec_data["last_returns"]
+    daily_returns = rec_data.get("daily_returns", {})
+    cum_returns = rec_data.get("cum_returns", {})
     current_dd = rec_data["current_drawdown"]
     buy_cutoff = rec_data["buy_cutoff"]
     sell_cutoff = rec_data["sell_cutoff"]
@@ -129,7 +130,8 @@ def main() -> None:
         display_name = f"{sym}({name})" if name != sym else sym
 
         price = last_prices.get(sym, 0.0)
-        ret = last_returns.get(sym, 0.0)
+        day_ret = daily_returns.get(sym, 0.0)
+        c_ret = cum_returns.get(sym, 0.0)
 
         if sym == last_target:
             status = "BUY ✅️"
@@ -144,7 +146,18 @@ def main() -> None:
 
         table_lines.append(f"📌 {display_name}")
         table_lines.append(f"  상태: {status}")
-        table_lines.append(f"  일간: {ret * 100:+.2f}%")
+        table_lines.append(f"  일간: {day_ret * 100:+.2f}%")
+
+        # 누적 수익률 뒤에 보유 정보 추가
+        cum_text = f"  누적: {c_ret * 100:+.2f}%"
+        if sym == last_target:
+            holding_days = result.get("holding_days", 0)
+            if holding_days > 0:
+                cum_text += f"({holding_days}거래일째 보유중)"
+        else:
+            cum_text += "(미보유)"
+        table_lines.append(cum_text)
+
         table_lines.append(f"  현재가: {currency_prefix}{format(price, price_fmt)}{currency_suffix}")
         if note:
             table_lines.append(f"  비고: {note}")
@@ -173,9 +186,21 @@ def main() -> None:
     print(f"\n추천 결과 저장: {out_path}")
 
     if is_changed:
-        print(f"⚠️ 포지션 변경 감지: {prev_target} -> {last_target}")
+        print(f"⚠️ 포지션 변경 감지: {prev_target} -> {target_display}")
     else:
-        print(f"ℹ️ 포지션 유지: {last_target}")
+        print(f"ℹ️ 포지션 유지: {target_display}")
+
+    # Slack 전송 내용 요약 출력
+    market_name = "🇺🇸 미국" if country.lower() == "us" else "🇰🇷 한국"
+    header_text = f"{market_name} 스위칭 {'포지션 변경 알림' if is_changed else '정기 보고'}"
+
+    print("\n=== Slack 전송 요약 ===")
+    print(f"{header_text} (기준일: {end_date})")
+    for line in table_lines:
+        if line.strip():
+            print(line.strip())
+    print(f"🎯 최종 타깃: {target_display}")
+    print("========================\n")
 
     # Slack 알림 전송
     if args.slack:

@@ -101,8 +101,7 @@ def send_slack_recommendation(
     # 4. 요약 정보
     # holding_days가 0이면 "신규 진입" 또는 "0일째" 등으로 표시하거나, 1일째부터 시작할 수도 있음.
     # runner.py 로직상 당일 포함 카운트되므로 1 이상임.
-    holding_text = f"({holding_days}거래일째 보유중)" if holding_days > 0 else "(신규 진입)"
-    summary_text = f"ℹ️ *기준일*: {as_of}\n🎯 *최종 타깃*: *{target_display}* {holding_text}"
+    summary_text = f"ℹ️ *기준일*: {as_of}\n🎯 *최종 타깃*: *{target_display}*"
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": summary_text}})
 
     # 5. 채널 맨션 (변경이 있을 때만)

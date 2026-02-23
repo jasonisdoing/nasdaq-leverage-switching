@@ -706,7 +706,35 @@ def run_backtest(
     last_date = signal_df.index[-1]
     last_row = signal_df.iloc[-1]
     last_prices = {sym: prices_full.at[last_date, sym] for sym in assets if sym in prices_full.columns}
-    last_returns = returns.iloc[-1] if not returns.empty else {}
+
+    # 전일 종가 및 보유 시작 시점 종가 추출 (수익률 계산용)
+    prev_prices = {}
+    holding_start_prices = {}
+    last_idx = prices_full.index.get_loc(last_date)
+    last_target = signal_df["target"].iloc[-1]
+
+    for sym in assets:
+        if sym in prices_full.columns:
+            # 전일 종가
+            if last_idx > 0:
+                prev_prices[sym] = prices_full.iloc[last_idx - 1][sym]
+            else:
+                prev_prices[sym] = last_prices[sym]
+
+            # 보유 시작 시점 종가 (N거래일 보유 중이면 N거래일 전 종가 기준)
+            # sym == last_target 인 경우만 계산 (사용자 요청: 미보유 종목은 0%)
+            if sym == last_target:
+                h_days = hold_days.get(sym, 0)
+                # h_days가 6이면, 6일 전 종가(last_idx - 6) 대비 현재가로 수익률 계산
+                if h_days > 0 and last_idx >= h_days:
+                    holding_start_prices[sym] = prices_full.iloc[last_idx - h_days][sym]
+                elif h_days > 0:
+                    # If not enough history for h_days, use the earliest available price
+                    holding_start_prices[sym] = prices_full.iloc[0][sym]
+            else:
+                # For non-target assets, cumulative return from holding start is 0
+                holding_start_prices[sym] = last_prices[sym]  # Set to current price to make cum_returns 0
+
     current_drawdown = last_row["drawdown"]
     buy_cutoff = -settings["drawdown_buy_cutoff"] / 100
     needed_recovery = buy_cutoff - current_drawdown if current_drawdown < buy_cutoff else 0
@@ -714,7 +742,13 @@ def run_backtest(
     recommendation_data = {
         "last_date": last_date.date().isoformat(),
         "last_prices": last_prices,
-        "last_returns": {sym: last_returns.get(sym, 0.0) for sym in assets},
+        "daily_returns": {
+            sym: (last_prices[sym] / prev_prices[sym] - 1) if sym in prev_prices else 0.0 for sym in assets
+        },
+        "cum_returns": {
+            sym: (last_prices[sym] / holding_start_prices[sym] - 1) if sym in holding_start_prices else 0.0
+            for sym in assets
+        },
         "current_drawdown": current_drawdown,
         "buy_cutoff": settings["drawdown_buy_cutoff"],
         "sell_cutoff": settings["drawdown_sell_cutoff"],
