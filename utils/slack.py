@@ -64,14 +64,21 @@ def send_slack_recommendation(
 
     # 2. 최적 파라미터 정보 (최근 튜닝 결과)
     if tuning_meta:
-        # 변경 시에는 파라미터 정보보다는 변경 사실이 중요하므로 간소화하거나 그대로 둠
-        # 여기서는 유지하되 위치 조절 가능. 일단 유지.
+        offense_ticker = tuning_meta.get("offense_ticker", "N/A")
+        offense_name = tuning_meta.get("offense_name", "")
+        offense_display = f"{offense_ticker}({offense_name})" if offense_name else offense_ticker
+
+        defense_ticker = tuning_meta.get("defense_ticker", "N/A")
+        defense_name = tuning_meta.get("defense_name", "")
+        defense_display = f"{defense_ticker}({defense_name})" if defense_name else defense_ticker
+
         tuning_text = (
             f"*🏆 최적 파라미터 (CAGR 기준)*\n"
-            f"• 방어 자산: {tuning_meta.get('defense_ticker', 'N/A')}\n"
+            f"• 공격 자산: {offense_display}\n"
+            f"• 방어 자산: {defense_display}\n"
             f"• 매수 컷: {tuning_meta.get('buy_cutoff', 0):.1f}%\n"
             f"• 매도 컷: {tuning_meta.get('sell_cutoff', 0):.1f}%\n"
-            f"• CAGR: {tuning_meta.get('cagr', 0):.2f}%"
+            f"• CAGR: {tuning_meta.get('cagr', 0) * 100:.2f}%"
         )
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": tuning_text}})
         blocks.append({"type": "divider"})

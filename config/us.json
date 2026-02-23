@@ -1,7 +1,7 @@
 {
     "backtested_date": "2026-02-23",
     "market": "us",
-    "start_date": "2025-09-01",
+    "start_date": "2025-02-01",
     "signal": {
         "ticker": "QQQ",
         "name": "Nasdaq 100"
