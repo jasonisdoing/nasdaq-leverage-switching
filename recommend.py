@@ -196,6 +196,7 @@ def main() -> None:
 
     print("\n=== Slack 전송 요약 ===")
     print(f"{header_text} (기준일: {end_date})")
+    print(f"🏆 최적 파라미터 (CAGR: {result.get('cagr', 0) * 100:.2f}%)")
     for line in table_lines:
         if line.strip():
             print(line.strip())
@@ -205,7 +206,10 @@ def main() -> None:
     # Slack 알림 전송
     if args.slack:
         tuning_meta = {
-            "defense_ticker": settings["defense_ticker"],
+            "offense_ticker": offense_ticker,
+            "offense_name": offense_name,
+            "defense_ticker": defense_ticker,
+            "defense_name": defense_name,
             "buy_cutoff": buy_cutoff,
             "sell_cutoff": sell_cutoff,
             "cagr": result.get("cagr", 0.0),
