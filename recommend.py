@@ -133,19 +133,33 @@ def main() -> None:
         day_ret = daily_returns.get(sym, 0.0)
         c_ret = cum_returns.get(sym, 0.0)
 
-        if sym == last_target:
-            status = "BUY ✅️"
-            note = "타깃"
-        elif sym == offense_ticker:
-            status = "WAIT ⏳️"
-            # 공격 자산이 타깃이 아닌 경우: DD 정보 표시
-            note = f"DD {current_dd * 100:.2f}% (매수컷 -{buy_cutoff:.2f}%, 필요 {needed_recovery:+.2f}%)"
-        else:
-            status = "WAIT ⏳️"
-            note = "방어"
+        # 비고(Note) 로직: 타깃/매매 조건 표시
+        sell_cutoff_val = -sell_cutoff / 100
+        needed_drop = (current_dd - sell_cutoff_val) * 100 if current_dd > sell_cutoff_val else 0
 
-        table_lines.append(f"📌 {display_name}")
-        table_lines.append(f"  상태: {status}")
+        # 상태별 이모지 및 텍스트 결정
+        if sym == last_target:
+            status_text = "BUY"
+            status_emoji = "✅️"
+        else:
+            status_text = "WAIT"
+            status_emoji = "⏳️"
+
+        signal_name = settings.get("signal", {}).get("name", "신호")
+        note = ""
+        if sym == offense_ticker:
+            if last_target == offense_ticker:
+                # 공격 자산 보유 중: 얼마나 더 하락하면 매도하는지 표시
+                note = f"{signal_name}가 {needed_drop:.2f}% 더 하락 시 매도"
+            else:
+                # 방어 자산 보유 중: 공격 자산이 얼마나 회복해야 매수하는지 표시
+                note = f"{signal_name}가 {needed_recovery:+.2f}% 더 회복 시 매수"
+        else:
+            # 방어 자산의 비고는 비워둠 (공격 자산 쪽에 모든 정보 집중)
+            note = ""
+
+        table_lines.append(f"{status_emoji} {display_name}")
+        table_lines.append(f"  상태: {status_text}")
         table_lines.append(f"  일간: {day_ret * 100:+.2f}%")
 
         # 누적 수익률 뒤에 보유 정보 추가
