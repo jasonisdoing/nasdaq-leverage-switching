@@ -1,7 +1,7 @@
 {
-    "backtested_date": "2026-02-23",
+    "backtested_date": "2026-02-27",
     "market": "us",
-    "start_date": "2025-02-01",
+    "start_date": "2025-03-01",
     "signal": {
         "ticker": "QQQ",
         "name": "Nasdaq 100"
@@ -15,7 +15,7 @@
         "name": "슈왑 미국 배당주 ETF"
     },
     "slippage": 0.25,
-    "drawdown_buy_cutoff": 0.3,
+    "drawdown_buy_cutoff": 0.2,
     "drawdown_sell_cutoff": 0.5,
     "benchmarks": [
         {
