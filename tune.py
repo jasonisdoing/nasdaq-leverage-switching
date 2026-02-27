@@ -1,13 +1,14 @@
 """튜닝 실행 엔트리 포인트."""
 
+import argparse
 import json
-import sys
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
 from logic.tune.runner import render_top_table, run_tuning
+from recommend import is_market_open
 
 # 국가별 튜닝 설정
 TUNING_CONFIG: dict[str, dict] = {
@@ -34,6 +35,7 @@ TUNING_CONFIG: dict[str, dict] = {
             {"ticker": "279530", "name": "KODEX 고배당주"},
             {"ticker": "484880", "name": "SOL 금융지주플러스고배당"},
             {"ticker": "140700", "name": "KODEX 보험"},
+            {"ticker": "117460", "name": "KODEX 에너지화학"},
         ],
     },
 }
@@ -48,17 +50,27 @@ def format_seconds(sec: float) -> str:
 
 
 def main() -> None:
-    # CLI 인자로 country 지정 (기본값: us)
-    country = sys.argv[1] if len(sys.argv) > 1 else "us"
-    config_path = Path(f"config/{country}.json")
+    parser = argparse.ArgumentParser(description="튜닝 실행 엔트리 포인트")
+    parser.add_argument("country", nargs="?", default="us", help="대상 국가 (us/kor)")
+    parser.add_argument("--auto", action="store_true", help="자동 실행 모드 (장 운영 시간 체크 수행)")
+    args = parser.parse_args()
 
-    if not config_path.exists():
-        print(f"설정 파일을 찾을 수 없습니다: {config_path}")
-        return
+    country = args.country
 
     if country not in TUNING_CONFIG:
         print(f"지원하지 않는 국가입니다: {country}")
         print(f"지원 국가: {list(TUNING_CONFIG.keys())}")
+        return
+
+    # 자동 실행 모드일 때만 장 운영 시간 체크
+    if args.auto and not is_market_open(country):
+        print(f"[{country.upper()}] 장 운영 시간이 아닙니다. 튜닝을 건너뜁니다.")
+        return
+
+    config_path = Path(f"config/{country}.json")
+
+    if not config_path.exists():
+        print(f"설정 파일을 찾을 수 없습니다: {config_path}")
         return
 
     tuning_config = TUNING_CONFIG[country]

@@ -30,9 +30,10 @@ jobs:
 
       - name: Run Tuning (KOR)
         run: |
-          CURRENT_HOUR=$(date +%H)
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] || [ "$CURRENT_HOUR" == "23" ]; then
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             python tune.py kor
+          else
+            python tune.py kor --auto
           fi
 
       - name: Run Recommendation (KOR) and Send Slack
