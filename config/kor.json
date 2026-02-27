@@ -1,7 +1,7 @@
 {
     "backtested_date": "2026-02-27",
     "market": "kor",
-    "start_date": "2025-02-01",
+    "start_date": "2025-03-01",
     "signal": {
         "ticker": "226490",
         "name": "KODEX 코스피"
