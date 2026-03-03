@@ -24,6 +24,7 @@ def send_slack_recommendation(
     is_changed: bool = False,
     holding_days: int = 0,
     is_warning: bool = False,
+    warning_target_display: str | None = None,
 ) -> bool:
     """나스닥 스위칭 추천 결과를 Slack으로 전송합니다."""
     token = os.environ.get("SLACK_BOT_TOKEN")
@@ -117,22 +118,35 @@ def send_slack_recommendation(
         blocks.append({"type": "divider"})
 
     # 4. 요약 정보
-    # holding_days가 0이면 "신규 진입" 또는 "0일째" 등으로 표시하거나, 1일째부터 시작할 수도 있음.
-    # runner.py 로직상 당일 포함 카운트되므로 1 이상임.
-    summary_text = f"ℹ️ *기준일*: {as_of}\n🎯 *최종 타깃*: *{target_display}*"
+    summary_text = f"ℹ️ *기준일*: {as_of}"
 
-    if is_warning:
-        summary_text += "\n\n*⚠️ 주의*: 장 마감 시까지 변동될 수 있습니다. 장 마감 후의 최종 확정 알림을 기다려주세요."
+    if is_warning and warning_target_display:
+        # 경고 모드: 현재 보유 + 전환 가능성 안내
+        summary_text += f"\n💼 *현재 보유*: *{target_display}*"
+        summary_text += (
+            f"\n\n*⚠️ 장중 경고*: 이대로 장 마감 시 "
+            f"*{warning_target_display}*(으)로 전환될 수 있습니다. "
+            "장 마감 후 최종 확정 알림을 기다려주세요."
+        )
+    elif is_warning:
+        # 경고 모드이지만 변경 없음
+        summary_text += f"\n🎯 *현재 보유*: *{target_display}*"
+        summary_text += "\n\n*ℹ️ 안내*: 장 마감 시까지 변동될 수 있습니다. 장 마감 후 최종 확정 알림을 기다려주세요."
     elif is_changed:
+        # 확정 모드에서 변경됨
+        summary_text += f"\n🎯 *최종 타깃*: *{target_display}*"
         summary_text += (
             "\n\n*🔔 실행 안내*: 오늘 종가 기준으로 시그널이 확정되었습니다. "
             "내일(다음 거래일) 아침 시초가에 해당 종목을 매매하세요."
         )
+    else:
+        # 확정 모드에서 변경 없음
+        summary_text += f"\n🎯 *최종 타깃*: *{target_display}*"
 
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": summary_text}})
 
-    # 5. 채널 맨션 (변경이 있을 때만 확정 알림에서 멘션, 경고일때도 멘션할지는 선택사항이나 일단 유지)
-    if is_changed:
+    # 5. 채널 맨션 (확정 알림에서 변경이 있을 때만, 경고 모드에서는 멘션 안 함)
+    if is_changed and not is_warning:
         blocks.append(
             {
                 "type": "section",

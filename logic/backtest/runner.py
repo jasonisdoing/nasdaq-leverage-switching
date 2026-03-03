@@ -131,6 +131,8 @@ def run_backtest(
             segment_lines.append(f" - 손익(%): {pct_val * 100:+.4f}%")
 
     hold_days = {s: 0 for s in assets}
+    pre_switch_hold_days = {s: 0 for s in assets}
+    pre_switch_prev_target = None
     asset_pnl = {s: 0.0 for s in assets}
     prev_pos_value = {s: 0.0 for s in assets}
     asset_exposure_days = {s: 0 for s in assets}
@@ -144,6 +146,9 @@ def run_backtest(
     sell_slip = slip
 
     for date in common_index:
+        # 매 반복 시작 전 상태 스냅샷 (경고 모드에서 전환 전 상태 복원용)
+        pre_switch_hold_days = dict(hold_days)
+        pre_switch_prev_target = prev_target
         start_value_today = last_total_value
         target = signal_df.at[date, "target"]
         trade_cf = {s: 0.0 for s in assets}  # 자산별 현금흐름(매수+: 자금투입, 매도-: 인출)
@@ -342,7 +347,7 @@ def run_backtest(
             rows.append(
                 [
                     str(row_idx),
-                    sym,
+                    _get_display_name(sym),
                     state,
                     str(hold_days[sym]),
                     f"{price:,.0f}" if market == "kor" else f"{price:,.2f}",
@@ -755,6 +760,21 @@ def run_backtest(
         "needed_recovery": needed_recovery * 100,  # 퍼센트로 변환
     }
 
+    # 전환 전 상태 데이터 (경고 모드에서 사용)
+    pre_switch_data = {
+        "target": pre_switch_prev_target,
+        "hold_days": pre_switch_hold_days,
+    }
+    # 전환 전 타깃의 누적 수익률 계산
+    ps_target = pre_switch_prev_target
+    if ps_target and ps_target != last_target and ps_target in prices_full.columns:
+        ps_h = pre_switch_hold_days.get(ps_target, 0)
+        if ps_h > 0 and last_idx >= ps_h:
+            ps_start_price = prices_full.iloc[last_idx - ps_h][ps_target]
+            pre_switch_data["cum_return"] = float(last_prices[ps_target] / ps_start_price - 1)
+        else:
+            pre_switch_data["cum_return"] = 0.0
+
     return {
         "start": start_date.isoformat(),
         "end": end_date.isoformat(),
@@ -779,4 +799,5 @@ def run_backtest(
         "segment_lines": segment_lines,
         "recommendation_data": recommendation_data,
         "holding_days": hold_days[signal_df["target"].iloc[-1]],
+        "pre_switch_data": pre_switch_data,
     }
