@@ -71,15 +71,15 @@ def main() -> None:
     args = parser.parse_args()
 
     country = args.country
-    is_warning = False
 
-    # 자동 실행 모드일 때만 장 운영 시간 체크
-    if args.auto:
-        status = get_market_status(country)
-        if status == "CLOSED":
-            print(f"[{country.upper()}] 장 운영 시간이 아니거나 마감 직후가 아닙니다. 실행을 건너뜁니다.")
-            return
-        is_warning = status == "OPEN"
+    # 항상 시장 상태를 확인하여 경고/확정 모드 결정
+    status = get_market_status(country)
+    is_warning = status == "OPEN"
+
+    # 자동 실행 모드(크론)에서만 장 외 시간 스킵
+    if args.auto and status == "CLOSED":
+        print(f"[{country.upper()}] 장 운영 시간이 아니거나 마감 직후가 아닙니다. 실행을 건너뜁니다.")
+        return
 
     config_path = Path(f"config/{country}.json")
 
