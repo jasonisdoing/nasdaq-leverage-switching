@@ -342,7 +342,7 @@ def run_backtest(
             rows.append(
                 [
                     str(row_idx),
-                    sym,
+                    _get_display_name(sym),
                     state,
                     str(hold_days[sym]),
                     f"{price:,.0f}" if market == "kor" else f"{price:,.2f}",
