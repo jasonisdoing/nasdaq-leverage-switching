@@ -10,21 +10,36 @@ from logic.backtest.settings import load_settings
 from utils.slack import send_slack_recommendation
 
 
-def is_market_open(country: str) -> bool:
-    """현재 시간이 해당 국가의 거래 시간인지 확인합니다."""
+def get_market_status(country: str) -> str:
+    """현재 시간이 해당 국가의 장중인지, 방금 마감했는지, 아니면 닫혀있는지 확인합니다."""
     schedule = MARKET_SCHEDULES.get(country)
     if not schedule:
-        return True  # 스케줄 정보가 없으면 항상 열려있다고 가정 (또는 에러 처리)
+        return "OPEN"
 
     tz = ZoneInfo(schedule["timezone"])
     now = datetime.now(tz)
 
     # 주말 체크 (월=0, ..., 일=6)
     if now.weekday() >= 5:
-        return False
+        return "CLOSED"
 
     current_time = now.time()
-    return schedule["open"] <= current_time <= schedule["close"]
+    open_time = schedule["open"]
+    close_time = schedule["close"]
+
+    if open_time <= current_time <= close_time:
+        return "OPEN"
+
+    # 장 마감 후 1시간 15분 이내인지 확인 (CLOSED_JUST_NOW)
+    from datetime import timedelta
+
+    close_dt = datetime.combine(now.date(), close_time, tzinfo=tz)
+    time_since_close = now - close_dt
+
+    if timedelta(0) <= time_since_close <= timedelta(minutes=75):
+        return "CLOSED_JUST_NOW"
+
+    return "CLOSED"
 
 
 def load_previous_state(country: str) -> dict:
@@ -56,11 +71,15 @@ def main() -> None:
     args = parser.parse_args()
 
     country = args.country
+    is_warning = False
 
     # 자동 실행 모드일 때만 장 운영 시간 체크
-    if args.auto and not is_market_open(country):
-        print(f"[{country.upper()}] 장 운영 시간이 아닙니다. 실행을 건너뜁니다.")
-        return
+    if args.auto:
+        status = get_market_status(country)
+        if status == "CLOSED":
+            print(f"[{country.upper()}] 장 운영 시간이 아니거나 마감 직후가 아닙니다. 실행을 건너뜁니다.")
+            return
+        is_warning = status == "OPEN"
 
     config_path = Path(f"config/{country}.json")
 
@@ -236,6 +255,7 @@ def main() -> None:
             tuning_meta=tuning_meta,
             is_changed=is_changed,
             holding_days=result.get("holding_days", 0),
+            is_warning=is_warning,
         )
 
 

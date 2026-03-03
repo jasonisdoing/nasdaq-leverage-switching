@@ -23,6 +23,7 @@ def send_slack_recommendation(
     tuning_meta: dict[str, Any] | None = None,
     is_changed: bool = False,
     holding_days: int = 0,
+    is_warning: bool = False,
 ) -> bool:
     """나스닥 스위칭 추천 결과를 Slack으로 전송합니다."""
     token = os.environ.get("SLACK_BOT_TOKEN")
@@ -40,12 +41,22 @@ def send_slack_recommendation(
     market_name = "🇺🇸 미국" if country.lower() == "us" else "🇰🇷 한국"
 
     # 이모지 및 타이틀 분기
-    if is_changed:
-        header_emoji = "🚨"  # 변경 시 더 주목도 높게
-        header_text = f"{market_name} 스위칭 포지션 변경 알림"
+    if is_warning:
+        # 장중 경고 알림
+        if is_changed:
+            header_emoji = "⚠️"
+            header_text = f"{market_name} 장중 포지션 변경 예상 (경고)"
+        else:
+            header_emoji = "📊"
+            header_text = f"{market_name} 장중 스위칭 정기 보고"
     else:
-        header_emoji = "📊"
-        header_text = f"{market_name} 스위칭 정기 보고"
+        # 장 마감 직후 최종 확정 알림
+        if is_changed:
+            header_emoji = "🚨"
+            header_text = f"{market_name} 스위칭 포지션 변경 확정! (내일 시초가 매매)"
+        else:
+            header_emoji = "✅"
+            header_text = f"{market_name} 장마감 스위칭 정기 보고"
 
     # 메시지 블록 구성
     blocks = []
@@ -109,9 +120,18 @@ def send_slack_recommendation(
     # holding_days가 0이면 "신규 진입" 또는 "0일째" 등으로 표시하거나, 1일째부터 시작할 수도 있음.
     # runner.py 로직상 당일 포함 카운트되므로 1 이상임.
     summary_text = f"ℹ️ *기준일*: {as_of}\n🎯 *최종 타깃*: *{target_display}*"
+
+    if is_warning:
+        summary_text += "\n\n*⚠️ 주의*: 장 마감 시까지 변동될 수 있습니다. 장 마감 후의 최종 확정 알림을 기다려주세요."
+    elif is_changed:
+        summary_text += (
+            "\n\n*🔔 실행 안내*: 오늘 종가 기준으로 시그널이 확정되었습니다. "
+            "내일(다음 거래일) 아침 시초가에 해당 종목을 매매하세요."
+        )
+
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": summary_text}})
 
-    # 5. 채널 맨션 (변경이 있을 때만)
+    # 5. 채널 맨션 (변경이 있을 때만 확정 알림에서 멘션, 경고일때도 멘션할지는 선택사항이나 일단 유지)
     if is_changed:
         blocks.append(
             {
