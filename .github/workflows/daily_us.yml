@@ -2,9 +2,13 @@ name: Daily Index Switching (US)
 
 on:
   schedule:
-    # 매 1시간마다 실행 (월-금)
-    # 스크립트 내부에서 장 운영 시간 체크
-    - cron: '1 * * * 1-5'
+    # 미국 장 기준 30분 후/30분 전 후보 시각을 모두 등록
+    # 서머타임: 10:00 ET = 14:00 UTC, 15:30 ET = 19:30 UTC
+    # 비서머타임: 10:00 ET = 15:00 UTC, 15:30 ET = 20:30 UTC
+    - cron: '0 14 * * 1-5'
+    - cron: '0 15 * * 1-5'
+    - cron: '30 19 * * 1-5'
+    - cron: '30 20 * * 1-5'
   workflow_dispatch: # 수동 실행 활성화
 
 jobs:

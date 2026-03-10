@@ -2,9 +2,9 @@ name: Daily Index Switching (KOR)
 
 on:
   schedule:
-    # 매 1시간마다 실행 (월-금)
-    # 스크립트 내부에서 장 운영 시간 체크
-    - cron: '1 * * * 1-5'
+    # 한국 장 기준 30분 후(09:30 KST = 00:30 UTC), 30분 전(15:00 KST = 06:00 UTC)
+    - cron: '30 0 * * 1-5'
+    - cron: '0 6 * * 1-5'
   workflow_dispatch: # 수동 실행 활성화
 
 jobs:
