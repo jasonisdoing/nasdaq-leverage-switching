@@ -1,5 +1,5 @@
 {
-    "backtested_date": "2026-02-27",
+    "backtested_date": "2026-03-10",
     "market": "us",
     "start_date": "2025-03-01",
     "signal": {
@@ -11,8 +11,8 @@
         "name": "Nasdaq 3배 레버리지"
     },
     "defense": {
-        "ticker": "SCHD",
-        "name": "슈왑 미국 배당주 ETF"
+        "ticker": "CASH",
+        "name": "현금"
     },
     "slippage": 0.25,
     "drawdown_buy_cutoff": 0.2,

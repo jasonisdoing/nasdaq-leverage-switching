@@ -65,7 +65,4 @@ def load_settings(path: Path) -> dict:
         settings["offense_name"] = settings.get("offense_name", settings["offense_ticker"])
         settings["defense_name"] = settings.get("defense_name", settings["defense_ticker"])
 
-    if settings.get("defense_ticker") == "CASH":
-        raise ValueError("defense_ticker에 CASH는 더 이상 허용되지 않습니다.")
-
     return settings

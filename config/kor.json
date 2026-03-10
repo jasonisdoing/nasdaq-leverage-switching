@@ -1,5 +1,5 @@
 {
-    "backtested_date": "2026-02-27",
+    "backtested_date": "2026-03-10",
     "market": "kor",
     "start_date": "2025-03-01",
     "signal": {
@@ -11,12 +11,12 @@
         "name": "KODEX 레버리지"
     },
     "defense": {
-        "ticker": "140700",
-        "name": "KODEX 보험"
+        "ticker": "CASH",
+        "name": "현금"
     },
     "slippage": 0.5,
-    "drawdown_buy_cutoff": 0.6,
-    "drawdown_sell_cutoff": 1.6,
+    "drawdown_buy_cutoff": 1.7,
+    "drawdown_sell_cutoff": 1.8,
     "benchmarks": [
         {
             "ticker": "226490",

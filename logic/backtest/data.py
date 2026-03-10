@@ -9,6 +9,25 @@ import pandas as pd
 import yfinance as yf
 
 
+def _requested_tickers(settings: dict) -> list[str]:
+    return [
+        settings["offense_ticker"],
+        settings["signal_ticker"],
+        settings["defense_ticker"],
+    ]
+
+
+def _market_tickers(settings: dict) -> list[str]:
+    return [ticker for ticker in _requested_tickers(settings) if ticker != "CASH"]
+
+
+def _inject_cash_column(df: pd.DataFrame, settings: dict) -> pd.DataFrame:
+    if settings.get("defense_ticker") == "CASH" and "CASH" not in df.columns:
+        df["CASH"] = 1.0
+    ordered = [ticker for ticker in _requested_tickers(settings) if ticker in df.columns]
+    return df.loc[:, ordered]
+
+
 def compute_bounds(settings: dict, end_bound: pd.Timestamp | None = None):
     """백테스트/튜닝/추천 모두 동일한 기간 산정 로직을 사용하도록 범위를 계산."""
     end = end_bound or pd.Timestamp.today().normalize()
@@ -60,49 +79,31 @@ def _extract_field(data: pd.DataFrame, field: str, tickers: list[str]) -> pd.Dat
 
 def _download_prices_us(settings: dict, start) -> pd.DataFrame:
     """미국 시장 종가 데이터를 yfinance로 다운로드."""
-    tickers = list(
-        {
-            settings["offense_ticker"],
-            settings["signal_ticker"],
-            settings["defense_ticker"],
-        }
-    )
+    tickers = list(set(_market_tickers(settings)))
     data = yf.download(tickers, start=start, auto_adjust=True, progress=False)
     if data is None or len(data) == 0:
         raise ValueError(f"가격 데이터를 받아오지 못했습니다: {tickers}")
     prices = _extract_field(data, "Close", tickers)
-    needed = [
-        settings["offense_ticker"],
-        settings["signal_ticker"],
-        settings["defense_ticker"],
-    ]
+    prices = _inject_cash_column(prices, settings)
+    needed = _requested_tickers(settings)
     prices = prices.dropna(subset=needed)
     if prices.empty:
-        raise ValueError(f"가격 데이터가 비어 있습니다: {tickers}")
+        raise ValueError(f"가격 데이터가 비어 있습니다: {_requested_tickers(settings)}")
     return prices
 
 
 def _download_opens_us(settings: dict, start) -> pd.DataFrame:
     """미국 시장 시가 데이터를 yfinance로 다운로드."""
-    tickers = list(
-        {
-            settings["offense_ticker"],
-            settings["signal_ticker"],
-            settings["defense_ticker"],
-        }
-    )
+    tickers = list(set(_market_tickers(settings)))
     data = yf.download(tickers, start=start, auto_adjust=True, progress=False)
     if data is None or len(data) == 0:
         raise ValueError(f"시가 데이터를 받아오지 못했습니다: {tickers}")
     opens = _extract_field(data, "Open", tickers)
-    needed = [
-        settings["offense_ticker"],
-        settings["signal_ticker"],
-        settings["defense_ticker"],
-    ]
+    opens = _inject_cash_column(opens, settings)
+    needed = _requested_tickers(settings)
     opens = opens.dropna(subset=needed)
     if opens.empty:
-        raise ValueError(f"시가 데이터가 비어 있습니다: {tickers}")
+        raise ValueError(f"시가 데이터가 비어 있습니다: {_requested_tickers(settings)}")
     return opens
 
 
@@ -130,13 +131,7 @@ def _download_prices_kor(settings: dict, start) -> pd.DataFrame:
     except ImportError as e:
         raise ImportError("pykrx 패키지가 설치되어 있지 않습니다. pip install pykrx") from e
 
-    tickers = list(
-        {
-            settings["offense_ticker"],
-            settings["signal_ticker"],
-            settings["defense_ticker"],
-        }
-    )
+    tickers = list(set(_market_tickers(settings)))
     start_str = pd.Timestamp(start).strftime("%Y%m%d")
     end_str = pd.Timestamp.today().strftime("%Y%m%d")
 
@@ -151,9 +146,10 @@ def _download_prices_kor(settings: dict, start) -> pd.DataFrame:
 
     prices = pd.DataFrame(dfs)
     prices.index = pd.to_datetime(prices.index)
+    prices = _inject_cash_column(prices, settings)
     prices = prices.dropna()
     if prices.empty:
-        raise ValueError(f"가격 데이터가 비어 있습니다: {tickers}")
+        raise ValueError(f"가격 데이터가 비어 있습니다: {_requested_tickers(settings)}")
     return prices
 
 
@@ -164,13 +160,7 @@ def _download_opens_kor(settings: dict, start) -> pd.DataFrame:
     except ImportError as e:
         raise ImportError("pykrx 패키지가 설치되어 있지 않습니다. pip install pykrx") from e
 
-    tickers = list(
-        {
-            settings["offense_ticker"],
-            settings["signal_ticker"],
-            settings["defense_ticker"],
-        }
-    )
+    tickers = list(set(_market_tickers(settings)))
     start_str = pd.Timestamp(start).strftime("%Y%m%d")
     end_str = pd.Timestamp.today().strftime("%Y%m%d")
 
@@ -185,9 +175,10 @@ def _download_opens_kor(settings: dict, start) -> pd.DataFrame:
 
     opens = pd.DataFrame(dfs)
     opens.index = pd.to_datetime(opens.index)
+    opens = _inject_cash_column(opens, settings)
     opens = opens.dropna()
     if opens.empty:
-        raise ValueError(f"시가 데이터가 비어 있습니다: {tickers}")
+        raise ValueError(f"시가 데이터가 비어 있습니다: {_requested_tickers(settings)}")
     return opens
 
 
