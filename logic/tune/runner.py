@@ -61,6 +61,9 @@ def _validate_defense_data_kor(tuning_config: dict, start_bound) -> list[str]:
             ticker = str(d)
             name = ticker
 
+        if ticker == "CASH":
+            continue
+
         df = pykrx_stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
         if df is None or df.empty:
             errors.append(f"  - {ticker}({name}): 데이터 없음")
@@ -88,6 +91,9 @@ def _validate_defense_data_us(tuning_config: dict, start_bound) -> list[str]:
         else:
             ticker = str(d)
             name = ticker
+
+        if ticker == "CASH":
+            continue
 
         df = yf.download(ticker, start=start_bound, auto_adjust=True, progress=False)
         if df is None or df.empty:
@@ -135,12 +141,15 @@ def _prefetch_data_us(settings: dict, tuning_config: dict, warmup_start):
             all_defs.append(d.get("ticker", ""))
         else:
             all_defs.append(str(d))
-    tickers = list({settings["offense_ticker"], settings["signal_ticker"], *all_defs})
+    tickers = list({settings["offense_ticker"], settings["signal_ticker"], *all_defs} - {"CASH"})
     price_raw = yf.download(tickers, start=warmup_start, auto_adjust=True, progress=False)
     if price_raw is None or len(price_raw) == 0:
         raise ValueError(f"가격 데이터를 받아오지 못했습니다: {tickers}")
     pre_prices = _extract_field(price_raw, "Close", tickers)
     pre_opens = _extract_field(price_raw, "Open", tickers)
+    if "CASH" in all_defs:
+        pre_prices["CASH"] = 1.0
+        pre_opens["CASH"] = 1.0
 
     pre_fx = download_fx(settings, warmup_start)
 
@@ -179,7 +188,7 @@ def _prefetch_data_kor(settings: dict, tuning_config: dict, warmup_start):
             all_defs.append(d.get("ticker", ""))
         else:
             all_defs.append(str(d))
-    tickers = list({settings["offense_ticker"], settings["signal_ticker"], *all_defs})
+    tickers = list({settings["offense_ticker"], settings["signal_ticker"], *all_defs} - {"CASH"})
 
     start_str = pd.Timestamp(warmup_start).strftime("%Y%m%d")
     end_str = pd.Timestamp.today().strftime("%Y%m%d")
@@ -201,6 +210,9 @@ def _prefetch_data_kor(settings: dict, tuning_config: dict, warmup_start):
 
     pre_opens = pd.DataFrame(open_dfs)
     pre_opens.index = pd.to_datetime(pre_opens.index)
+    if "CASH" in all_defs:
+        pre_prices["CASH"] = 1.0
+        pre_opens["CASH"] = 1.0
 
     # 한국은 환율 불필요 (원화 기준)
     pre_fx = download_fx(settings, warmup_start)

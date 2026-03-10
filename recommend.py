@@ -1,6 +1,6 @@
 import argparse
 import json
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -8,6 +8,11 @@ from config import MARKET_SCHEDULES
 from logic.backtest.runner import run_backtest
 from logic.backtest.settings import load_settings
 from utils.slack import send_slack_recommendation
+
+AUTO_TRIGGER_TIMES = {
+    "kor": (time(9, 30), time(15, 0)),
+    "us": (time(10, 0), time(15, 30)),
+}
 
 
 def get_market_status(country: str) -> str:
@@ -40,6 +45,22 @@ def get_market_status(country: str) -> str:
         return "CLOSED_JUST_NOW"
 
     return "CLOSED"
+
+
+def is_auto_trigger_time(country: str) -> bool:
+    """자동 실행 시 현지 장 기준 목표 시각인지 확인합니다."""
+    schedule = MARKET_SCHEDULES.get(country)
+    if not schedule:
+        return True
+
+    trigger_times = AUTO_TRIGGER_TIMES.get(country)
+    if not trigger_times:
+        return True
+
+    tz = ZoneInfo(schedule["timezone"])
+    now = datetime.now(tz)
+    current_hm = (now.hour, now.minute)
+    return any(current_hm == (trigger.hour, trigger.minute) for trigger in trigger_times)
 
 
 def load_previous_state(country: str) -> dict:
@@ -75,6 +96,11 @@ def main() -> None:
     # 항상 시장 상태를 확인하여 경고/확정 모드 결정
     status = get_market_status(country)
     is_warning = status == "OPEN"
+
+    # 자동 실행 모드에서는 목표 시각이 아닐 때 스킵
+    if args.auto and not is_auto_trigger_time(country):
+        print(f"[{country.upper()}] 자동 실행 목표 시각이 아닙니다. 실행을 건너뜁니다.")
+        return
 
     # 자동 실행 모드(크론)에서만 장 외 시간 스킵
     if args.auto and status == "CLOSED":

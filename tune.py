@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from logic.tune.runner import render_top_table, run_tuning
-from recommend import is_market_open
+from recommend import get_market_status
 
 # 국가별 튜닝 설정
 TUNING_CONFIG: dict[str, dict] = {
@@ -16,26 +16,28 @@ TUNING_CONFIG: dict[str, dict] = {
         "drawdown_buy_cutoff": np.arange(0.1, 3.1, 0.1),
         "drawdown_sell_cutoff": np.arange(0.1, 3.1, 0.1),
         "defense": [
-            {"ticker": "SCHD", "name": "슈왑 미국 배당주 ETF"},
-            {"ticker": "SPLV", "name": "인베스코 S&P500 저변동 ETF"},
-            {"ticker": "SPHD", "name": "인베스코 고배당 저변동 ETF"},
+            {"ticker": "CASH", "name": "현금"},
+            # {"ticker": "SCHD", "name": "슈왑 미국 배당주 ETF"},
+            # {"ticker": "SPLV", "name": "인베스코 S&P500 저변동 ETF"},
+            # {"ticker": "SPHD", "name": "인베스코 고배당 저변동 ETF"},
             # {"ticker": "GLDM", "name": "SPDR 금 미니 ETF"},
             # {"ticker": "GDX", "name": "반에크 금광 ETF"},
             # {"ticker": "BRK-B", "name": "버크셔 해서웨이 B"},
-            {"ticker": "VYM", "name": "뱅가드 미국 고배당주 ETF"},
-            {"ticker": "DJD", "name": "인베스코 다우 존스 산업 평균 배당주 ETF"},
+            # {"ticker": "VYM", "name": "뱅가드 미국 고배당주 ETF"},
+            # {"ticker": "DJD", "name": "인베스코 다우 존스 산업 평균 배당주 ETF"},
         ],
     },
     "kor": {
         "drawdown_buy_cutoff": np.arange(0.1, 3.1, 0.1),
         "drawdown_sell_cutoff": np.arange(0.1, 3.1, 0.1),
         "defense": [
-            {"ticker": "161510", "name": "PLUS 고배당주"},
-            {"ticker": "091170", "name": "KODEX 은행"},
-            {"ticker": "279530", "name": "KODEX 고배당주"},
-            {"ticker": "484880", "name": "SOL 금융지주플러스고배당"},
-            {"ticker": "140700", "name": "KODEX 보험"},
-            {"ticker": "117460", "name": "KODEX 에너지화학"},
+            {"ticker": "CASH", "name": "현금"},
+            # {"ticker": "161510", "name": "PLUS 고배당주"},
+            # {"ticker": "091170", "name": "KODEX 은행"},
+            # {"ticker": "279530", "name": "KODEX 고배당주"},
+            # {"ticker": "484880", "name": "SOL 금융지주플러스고배당"},
+            # {"ticker": "140700", "name": "KODEX 보험"},
+            # {"ticker": "117460", "name": "KODEX 에너지화학"},
         ],
     },
 }
@@ -63,7 +65,7 @@ def main() -> None:
         return
 
     # 자동 실행 모드일 때만 장 운영 시간 체크
-    if args.auto and not is_market_open(country):
+    if args.auto and get_market_status(country) == "CLOSED":
         print(f"[{country.upper()}] 장 운영 시간이 아닙니다. 튜닝을 건너뜁니다.")
         return
 
