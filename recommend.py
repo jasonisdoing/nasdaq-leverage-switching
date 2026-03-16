@@ -13,6 +13,7 @@ AUTO_TRIGGER_TIMES = {
     "kor": (time(9, 30), time(15, 0)),
     "us": (time(10, 0), time(15, 30)),
 }
+AUTO_TRIGGER_TOLERANCE_MINUTES = 10
 
 
 def get_market_status(country: str) -> str:
@@ -59,8 +60,13 @@ def is_auto_trigger_time(country: str) -> bool:
 
     tz = ZoneInfo(schedule["timezone"])
     now = datetime.now(tz)
-    current_hm = (now.hour, now.minute)
-    return any(current_hm == (trigger.hour, trigger.minute) for trigger in trigger_times)
+    now_minutes = now.hour * 60 + now.minute
+
+    for trigger in trigger_times:
+        trigger_minutes = trigger.hour * 60 + trigger.minute
+        if abs(now_minutes - trigger_minutes) <= AUTO_TRIGGER_TOLERANCE_MINUTES:
+            return True
+    return False
 
 
 def load_previous_state(country: str) -> dict:
@@ -99,7 +105,14 @@ def main() -> None:
 
     # 자동 실행 모드에서는 목표 시각이 아닐 때 스킵
     if args.auto and not is_auto_trigger_time(country):
-        print(f"[{country.upper()}] 자동 실행 목표 시각이 아닙니다. 실행을 건너뜁니다.")
+        schedule = MARKET_SCHEDULES.get(country, {})
+        tz_name = schedule.get("timezone", "UTC")
+        now_local = datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M %Z")
+        trigger_labels = ", ".join(t.strftime("%H:%M") for t in AUTO_TRIGGER_TIMES.get(country, ()))
+        print(
+            f"[{country.upper()}] 자동 실행 목표 시각이 아닙니다. "
+            f"(현재 현지시각: {now_local}, 목표: {trigger_labels}, 허용오차: ±{AUTO_TRIGGER_TOLERANCE_MINUTES}분)"
+        )
         return
 
     # 자동 실행 모드(크론)에서만 장 외 시간 스킵
