@@ -7,6 +7,9 @@ on:
     - cron: '0 6 * * 1-5'
   workflow_dispatch: # 수동 실행 활성화
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   recommend:
     runs-on: ubuntu-latest
