@@ -13,7 +13,7 @@ AUTO_TRIGGER_TIMES = {
     "kor": (time(9, 30), time(15, 0)),
     "us": (time(10, 0), time(15, 30)),
 }
-AUTO_TRIGGER_TOLERANCE_MINUTES = 10
+AUTO_TRIGGER_TOLERANCE_MINUTES = 30
 
 
 def get_market_status(country: str) -> str:
@@ -100,14 +100,18 @@ def main() -> None:
     country = args.country
 
     # 항상 시장 상태를 확인하여 경고/확정 모드 결정
+    schedule = MARKET_SCHEDULES.get(country, {})
+    tz_name = schedule.get("timezone", "UTC")
+    now_local = datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M %Z")
     status = get_market_status(country)
     is_warning = status == "OPEN"
+    print(
+        f"[{country.upper()}] 실행 시작 "
+        f"(현지시각: {now_local}, market_status: {status}, auto={args.auto}, slack={args.slack})"
+    )
 
     # 자동 실행 모드에서는 목표 시각이 아닐 때 스킵
     if args.auto and not is_auto_trigger_time(country):
-        schedule = MARKET_SCHEDULES.get(country, {})
-        tz_name = schedule.get("timezone", "UTC")
-        now_local = datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M %Z")
         trigger_labels = ", ".join(t.strftime("%H:%M") for t in AUTO_TRIGGER_TIMES.get(country, ()))
         print(
             f"[{country.upper()}] 자동 실행 목표 시각이 아닙니다. "
