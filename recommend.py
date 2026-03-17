@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from config import MARKET_SCHEDULES
 from logic.backtest.runner import run_backtest
 from logic.backtest.settings import load_settings
-from utils.slack import send_slack_recommendation
+from utils.slack import send_slack_auto_trigger_debug, send_slack_recommendation
 
 AUTO_TRIGGER_SLOTS = {
     "kor": (("open_30m", time(9, 30)), ("close_30m", time(15, 0))),
@@ -71,6 +71,28 @@ def get_auto_trigger_slot(country: str) -> str | None:
             matched_slot = slot_name
             matched_diff = diff
     return matched_slot
+
+
+def get_nearest_auto_trigger_label(country: str) -> str:
+    """현재 시각 기준 가장 가까운 목표 슬롯 라벨을 반환합니다."""
+    schedule = MARKET_SCHEDULES.get(country)
+    trigger_slots = AUTO_TRIGGER_SLOTS.get(country, ())
+    if not schedule or not trigger_slots:
+        return "N/A"
+
+    tz = ZoneInfo(schedule["timezone"])
+    now = datetime.now(tz)
+    now_minutes = now.hour * 60 + now.minute
+    nearest_label = "N/A"
+    nearest_diff = None
+
+    for _, trigger in trigger_slots:
+        trigger_minutes = trigger.hour * 60 + trigger.minute
+        diff = abs(now_minutes - trigger_minutes)
+        if nearest_diff is None or diff < nearest_diff:
+            nearest_diff = diff
+            nearest_label = trigger.strftime("%H:%M")
+    return nearest_label
 
 
 def load_auto_alert_state(country: str) -> dict:
@@ -138,6 +160,17 @@ def main() -> None:
     )
 
     auto_slot = get_auto_trigger_slot(country) if args.auto else None
+    nearest_trigger_label = get_nearest_auto_trigger_label(country) if args.auto else "N/A"
+
+    if args.auto and args.slack:
+        initial_outcome = "목표 슬롯 감지" if auto_slot is not None else "목표 슬롯 밖이라 스킵 예정"
+        send_slack_auto_trigger_debug(
+            country=country,
+            now_local=now_local,
+            target_label=nearest_trigger_label,
+            outcome=initial_outcome,
+            market_status=status,
+        )
 
     # 자동 실행 모드에서는 목표 시각이 아닐 때 스킵
     if args.auto and auto_slot is None:
