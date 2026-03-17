@@ -9,11 +9,11 @@ from logic.backtest.runner import run_backtest
 from logic.backtest.settings import load_settings
 from utils.slack import send_slack_recommendation
 
-AUTO_TRIGGER_TIMES = {
-    "kor": (time(9, 30), time(15, 0)),
-    "us": (time(10, 0), time(15, 30)),
+AUTO_TRIGGER_SLOTS = {
+    "kor": (("open_30m", time(9, 30)), ("close_30m", time(15, 0))),
+    "us": (("open_30m", time(10, 0)), ("close_30m", time(15, 30))),
 }
-AUTO_TRIGGER_TOLERANCE_MINUTES = 30
+AUTO_TRIGGER_TOLERANCE_MINUTES = 15
 
 
 def get_market_status(country: str) -> str:
@@ -48,25 +48,50 @@ def get_market_status(country: str) -> str:
     return "CLOSED"
 
 
-def is_auto_trigger_time(country: str) -> bool:
-    """자동 실행 시 현지 장 기준 목표 시각인지 확인합니다."""
+def get_auto_trigger_slot(country: str) -> str | None:
+    """자동 실행 시 현지 장 기준 목표 슬롯인지 확인합니다."""
     schedule = MARKET_SCHEDULES.get(country)
     if not schedule:
-        return True
+        return "default"
 
-    trigger_times = AUTO_TRIGGER_TIMES.get(country)
-    if not trigger_times:
-        return True
+    trigger_slots = AUTO_TRIGGER_SLOTS.get(country)
+    if not trigger_slots:
+        return "default"
 
     tz = ZoneInfo(schedule["timezone"])
     now = datetime.now(tz)
     now_minutes = now.hour * 60 + now.minute
+    matched_slot = None
+    matched_diff = None
 
-    for trigger in trigger_times:
+    for slot_name, trigger in trigger_slots:
         trigger_minutes = trigger.hour * 60 + trigger.minute
-        if abs(now_minutes - trigger_minutes) <= AUTO_TRIGGER_TOLERANCE_MINUTES:
-            return True
-    return False
+        diff = abs(now_minutes - trigger_minutes)
+        if diff <= AUTO_TRIGGER_TOLERANCE_MINUTES and (matched_diff is None or diff < matched_diff):
+            matched_slot = slot_name
+            matched_diff = diff
+    return matched_slot
+
+
+def load_auto_alert_state(country: str) -> dict:
+    """저장된 자동 알림 상태를 로드합니다."""
+    state_path = Path(f"state/last_auto_alert_{country}.json")
+    if not state_path.exists():
+        return {}
+    try:
+        with state_path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_auto_alert_state(country: str, state: dict) -> None:
+    """자동 알림 상태를 저장합니다."""
+    state_dir = Path("state")
+    state_dir.mkdir(exist_ok=True)
+    state_path = state_dir / f"last_auto_alert_{country}.json"
+    with state_path.open("w", encoding="utf-8") as f:
+        json.dump(state, f, indent=4, ensure_ascii=False)
 
 
 def load_previous_state(country: str) -> dict:
@@ -102,7 +127,9 @@ def main() -> None:
     # 항상 시장 상태를 확인하여 경고/확정 모드 결정
     schedule = MARKET_SCHEDULES.get(country, {})
     tz_name = schedule.get("timezone", "UTC")
-    now_local = datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M %Z")
+    now_dt_local = datetime.now(ZoneInfo(tz_name))
+    now_local = now_dt_local.strftime("%Y-%m-%d %H:%M %Z")
+    today_local = now_dt_local.date().isoformat()
     status = get_market_status(country)
     is_warning = status == "OPEN"
     print(
@@ -110,14 +137,23 @@ def main() -> None:
         f"(현지시각: {now_local}, market_status: {status}, auto={args.auto}, slack={args.slack})"
     )
 
+    auto_slot = get_auto_trigger_slot(country) if args.auto else None
+
     # 자동 실행 모드에서는 목표 시각이 아닐 때 스킵
-    if args.auto and not is_auto_trigger_time(country):
-        trigger_labels = ", ".join(t.strftime("%H:%M") for t in AUTO_TRIGGER_TIMES.get(country, ()))
+    if args.auto and auto_slot is None:
+        trigger_labels = ", ".join(t.strftime("%H:%M") for _, t in AUTO_TRIGGER_SLOTS.get(country, ()))
         print(
             f"[{country.upper()}] 자동 실행 목표 시각이 아닙니다. "
             f"(현재 현지시각: {now_local}, 목표: {trigger_labels}, 허용오차: ±{AUTO_TRIGGER_TOLERANCE_MINUTES}분)"
         )
         return
+
+    # 자동 실행 모드에서는 같은 날짜/슬롯 중복 전송 방지
+    if args.auto and auto_slot is not None:
+        auto_state = load_auto_alert_state(country)
+        if auto_state.get("date") == today_local and auto_state.get("slot") == auto_slot:
+            print(f"[{country.upper()}] 자동 알림은 이미 전송되었습니다. (date={today_local}, slot={auto_slot})")
+            return
 
     # 자동 실행 모드(크론)에서만 장 외 시간 스킵
     if args.auto and status == "CLOSED":
@@ -335,6 +371,15 @@ def main() -> None:
             is_warning=is_warning,
             warning_target_display=warning_target_display,
         )
+        if args.auto and auto_slot is not None:
+            save_auto_alert_state(
+                country,
+                {
+                    "date": today_local,
+                    "slot": auto_slot,
+                    "sent_at": datetime.now().isoformat(),
+                },
+            )
 
 
 if __name__ == "__main__":
