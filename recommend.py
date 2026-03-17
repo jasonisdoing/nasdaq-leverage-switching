@@ -13,7 +13,7 @@ AUTO_TRIGGER_SLOTS = {
     "kor": (("open_30m", time(9, 30)), ("close_30m", time(15, 0))),
     "us": (("open_30m", time(10, 0)), ("close_30m", time(15, 30))),
 }
-AUTO_TRIGGER_TOLERANCE_MINUTES = 15
+AUTO_TRIGGER_TOLERANCE_MINUTES = 45
 
 
 def get_market_status(country: str) -> str:
