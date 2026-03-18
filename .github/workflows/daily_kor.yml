@@ -3,11 +3,8 @@ name: Daily Index Switching (KOR)
 on:
   schedule:
     # 한국 장 기준 30분 후(09:30 KST = 00:30 UTC), 30분 전(15:00 KST = 06:00 UTC)
-    # 목표 시각 주변을 더 자주 실행하고 recommend.py가 정확한 슬롯만 통과시킴
-    - cron: '*/5 0 * * 1-5'
-    - cron: '0,5,10,15 1 * * 1-5'
-    - cron: '15,20,25,30,35,40,45,50,55 5 * * 1-5'
-    - cron: '*/5 6 * * 1-5'
+    # GitHub schedule 지연에 대비해 한국 장 시간대 주변을 10분마다 실행
+    - cron: '*/10 0-8 * * 1-5'
   workflow_dispatch: # 수동 실행 활성화
 
 env:
@@ -38,6 +35,7 @@ jobs:
 
       - name: Run Recommendation (KOR) and Send Slack
         env:
+          AUTO_TRIGGER_DEBUG: "true"
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           TARGET_CHANNEL_ID: ${{ secrets.TARGET_CHANNEL_ID }}
         run: python recommend.py kor --slack --auto
