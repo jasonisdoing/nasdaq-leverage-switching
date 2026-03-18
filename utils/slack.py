@@ -15,6 +15,12 @@ except ImportError:
 load_dotenv()
 
 
+def _format_display_name(ticker: str, name: str | None) -> str:
+    if name and name != ticker:
+        return f"{name}({ticker})"
+    return ticker
+
+
 def _get_slack_client() -> tuple[object | None, str | None]:
     token = os.environ.get("SLACK_BOT_TOKEN")
     channel_id = os.environ.get("TARGET_CHANNEL_ID")
@@ -126,11 +132,11 @@ def send_slack_recommendation(
     if tuning_meta:
         offense_ticker = tuning_meta.get("offense_ticker", "N/A")
         offense_name = tuning_meta.get("offense_name", "")
-        offense_display = f"{offense_ticker}({offense_name})" if offense_name else offense_ticker
+        offense_display = _format_display_name(offense_ticker, offense_name)
 
         defense_ticker = tuning_meta.get("defense_ticker", "N/A")
         defense_name = tuning_meta.get("defense_name", "")
-        defense_display = f"{defense_ticker}({defense_name})" if defense_name else defense_ticker
+        defense_display = _format_display_name(defense_ticker, defense_name)
 
         tuning_text = (
             f"*🏆 최적 파라미터 (CAGR 기준)*\n"
