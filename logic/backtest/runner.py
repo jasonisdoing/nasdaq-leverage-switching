@@ -768,6 +768,9 @@ def run_backtest(
     # 전환 전 타깃의 누적 수익률 계산
     ps_target = pre_switch_prev_target
     if ps_target and ps_target != last_target and ps_target in prices_full.columns:
+        pre_switch_data["last_price"] = float(last_prices[ps_target])
+        if ps_target in prev_prices and prev_prices[ps_target] != 0:
+            pre_switch_data["daily_return"] = float(last_prices[ps_target] / prev_prices[ps_target] - 1)
         ps_h = pre_switch_hold_days.get(ps_target, 0)
         if ps_h > 0 and last_idx >= ps_h:
             ps_start_price = prices_full.iloc[last_idx - ps_h][ps_target]

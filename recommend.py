@@ -15,6 +15,7 @@ AUTO_TRIGGER_SLOTS = {
     "us": (("open_30m", time(10, 0)), ("close_30m", time(15, 30))),
 }
 AUTO_TRIGGER_TOLERANCE_MINUTES = 45
+FINAL_SYNC_SLOT = "final_close"
 
 
 def get_market_status(country: str) -> str:
@@ -150,6 +151,32 @@ def _format_asset_price(value: float | None, prefix: str, suffix: str, fmt: str)
     return f"{prefix}{format(value, fmt)}{suffix}"
 
 
+def _format_display_name(ticker: str, name: str | None) -> str:
+    if name and name != ticker:
+        return f"{name}({ticker})"
+    return ticker
+
+
+def _build_ticker_names(settings: dict, prev_state: dict, display_target: str | None) -> dict[str, str]:
+    ticker_names = {
+        settings["offense_ticker"]: settings.get("offense_name", settings["offense_ticker"]),
+        settings["defense_ticker"]: settings.get("defense_name", settings["defense_ticker"]),
+        settings["signal_ticker"]: settings.get("signal_name", settings["signal_ticker"]),
+    }
+
+    for entry in settings.get("benchmarks", []):
+        if isinstance(entry, dict):
+            ticker = entry.get("ticker")
+            name = entry.get("name")
+            if ticker and name:
+                ticker_names[ticker] = name
+
+    if display_target and display_target not in ticker_names:
+        ticker_names[display_target] = prev_state.get("target_name", display_target)
+
+    return ticker_names
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="추천 실행 엔트리 포인트")
     parser.add_argument("country", nargs="?", default="us", help="대상 국가 (us/kor)")
@@ -172,16 +199,24 @@ def main() -> None:
         f"(현지시각: {now_local}, market_status: {status}, auto={args.auto}, slack={args.slack})"
     )
 
-    auto_slot = get_auto_trigger_slot(country) if args.auto else None
+    auto_slot = None
+    if args.auto:
+        if status == "CLOSED_JUST_NOW":
+            auto_slot = FINAL_SYNC_SLOT
+        else:
+            auto_slot = get_auto_trigger_slot(country)
     auto_debug = os.environ.get("AUTO_TRIGGER_DEBUG", "").lower() == "true"
     nearest_trigger_label = get_nearest_auto_trigger_label(country) if args.auto else "N/A"
 
     if args.auto and args.slack and auto_debug:
-        initial_outcome = "목표 슬롯 감지" if auto_slot is not None else "목표 슬롯 밖이라 스킵 예정"
+        if auto_slot == FINAL_SYNC_SLOT:
+            initial_outcome = "장마감 후 확정 슬롯 감지"
+        else:
+            initial_outcome = "목표 슬롯 감지" if auto_slot is not None else "목표 슬롯 밖이라 스킵 예정"
         send_slack_auto_trigger_debug(
             country=country,
             now_local=now_local,
-            target_label=nearest_trigger_label,
+            target_label=("장마감 후 확정" if auto_slot == FINAL_SYNC_SLOT else nearest_trigger_label),
             outcome=initial_outcome,
             market_status=status,
         )
@@ -279,13 +314,7 @@ def main() -> None:
         currency_suffix = ""
         price_fmt = ",.2f"
 
-    # 티커+이름 매핑
-    ticker_names = {
-        offense_ticker: offense_name,
-        defense_ticker: defense_name,
-    }
-    if display_target and display_target not in ticker_names:
-        ticker_names[display_target] = prev_state.get("target_name", display_target)
+    ticker_names = _build_ticker_names(settings, prev_state, display_target)
 
     # 경고 모드에서 전환 전 보유 데이터 추출
     pre_switch_data = result.get("pre_switch_data", {})
@@ -303,7 +332,7 @@ def main() -> None:
 
     for sym in assets:
         name = ticker_names.get(sym, sym)
-        display_name = f"{sym}({name})" if name != sym else sym
+        display_name = _format_display_name(sym, name)
 
         has_market_data = sym in last_prices
         price = last_prices.get(sym)
@@ -312,6 +341,10 @@ def main() -> None:
 
         # 경고 모드에서 현재 보유 종목의 누적 수익률은 전환 전 데이터 사용
         if is_warning and warning_target and sym == display_target:
+            if price is None:
+                price = pre_switch_data.get("last_price")
+            if day_ret is None:
+                day_ret = pre_switch_data.get("daily_return")
             if pre_switch_cum_return is not None:
                 c_ret = pre_switch_cum_return
 
@@ -365,13 +398,13 @@ def main() -> None:
 
     # 타깃 이름 (현재 보유 기준)
     target_name = ticker_names.get(display_target, display_target)
-    target_display = f"{display_target}({target_name})" if target_name != display_target else display_target
+    target_display = _format_display_name(display_target, target_name)
 
     # 경고 모드에서 전환 가능 종목 이름
     warning_target_display = None
     if warning_target:
         wt_name = ticker_names.get(warning_target, warning_target)
-        warning_target_display = f"{warning_target}({wt_name})" if wt_name != warning_target else warning_target
+        warning_target_display = _format_display_name(warning_target, wt_name)
 
     # 로그 파일 저장: zresults/{country}/
     out_dir = Path(f"zresults/{country}")
