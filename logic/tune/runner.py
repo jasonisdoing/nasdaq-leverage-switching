@@ -66,7 +66,7 @@ def _validate_defense_data_kor(tuning_config: dict, start_bound) -> list[str]:
 
         df = pykrx_stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
         if df is None or df.empty:
-            errors.append(f"  - {ticker}({name}): 데이터 없음")
+            errors.append(f"  - {name}({ticker}): 데이터 없음")
         else:
             data_start = df.index[0].strftime("%Y-%m-%d")
             # start_bound가 주말/휴일일 수 있으므로 첫 영업일 기준으로 비교
@@ -74,7 +74,7 @@ def _validate_defense_data_kor(tuning_config: dict, start_bound) -> list[str]:
             adjusted_start = pd.Timestamp(start_bound) + pd.offsets.BDay(5)
             if df.index[0] > adjusted_start:
                 required_start = pd.Timestamp(start_bound).strftime("%Y-%m-%d")
-                errors.append(f"  - {ticker}({name}): 데이터 시작일 {data_start} (필요: {required_start})")
+                errors.append(f"  - {name}({ticker}): 데이터 시작일 {data_start} (필요: {required_start})")
 
     return errors
 
@@ -97,7 +97,7 @@ def _validate_defense_data_us(tuning_config: dict, start_bound) -> list[str]:
 
         df = yf.download(ticker, start=start_bound, auto_adjust=True, progress=False)
         if df is None or df.empty:
-            errors.append(f"  - {ticker}({name}): 데이터 없음")
+            errors.append(f"  - {name}({ticker}): 데이터 없음")
         else:
             data_start = df.index[0].strftime("%Y-%m-%d")
             # start_bound가 주말/휴일일 수 있으므로 첫 영업일 기준으로 비교
@@ -105,7 +105,7 @@ def _validate_defense_data_us(tuning_config: dict, start_bound) -> list[str]:
             adjusted_start = pd.Timestamp(start_bound) + pd.offsets.BDay(5)
             if df.index[0] > adjusted_start:
                 required_start = pd.Timestamp(start_bound).strftime("%Y-%m-%d")
-                errors.append(f"  - {ticker}({name}): 데이터 시작일 {data_start} (필요: {required_start})")
+                errors.append(f"  - {name}({ticker}): 데이터 시작일 {data_start} (필요: {required_start})")
     return errors
 
 
@@ -401,7 +401,7 @@ def render_top_table(
             name = defense_obj.get("name", "")
         else:
             name = defense_names.get(ticker, "") if defense_names else ""
-        display = f"{ticker}({name})" if name else ticker
+        display = f"{name}({ticker})" if name else ticker
         rows.append(
             [
                 display,

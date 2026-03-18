@@ -114,10 +114,10 @@ def run_backtest(
     }
 
     def _get_display_name(ticker: str) -> str:
-        """티커+이름 형식으로 표시."""
+        """이름(티커) 형식으로 표시."""
         name = _ticker_names.get(ticker, ticker)
-        if name != ticker and name != "현금":
-            return f"{ticker}({name})"
+        if name != ticker:
+            return f"{name}({ticker})"
         return ticker
 
     def _add_segment(start_dt, end_dt, days, tgt, qty_val, pnl_val, pct_val):
@@ -503,9 +503,9 @@ def run_backtest(
     trade_display = settings["offense_ticker"]
     defense_display = settings["defense_ticker"]
     if settings.get("offense_name") and settings["offense_name"] != settings["offense_ticker"]:
-        trade_display = f"{settings['offense_ticker']}({settings['offense_name']})"
+        trade_display = f"{settings['offense_name']}({settings['offense_ticker']})"
     if settings.get("defense_name") and settings["defense_name"] != settings["defense_ticker"]:
-        defense_display = f"{settings['defense_ticker']}({settings['defense_name']})"
+        defense_display = f"{settings['defense_name']}({settings['defense_ticker']})"
     strat_label = f"{trade_display}<->{defense_display}"
     perf_rows = [
         [
@@ -522,7 +522,7 @@ def run_backtest(
             perf_rows.append(
                 [
                     str(idx),
-                    f"{t}({name})" if name and name != t else t,
+                    f"{name}({t})" if name and name != t else t,
                     f"{br * 100:+.2f}%",
                     f"{cagr_b * 100:+.2f}%",
                     f"{dd_b * 100:.2f}%",
@@ -574,7 +574,7 @@ def run_backtest(
     for idx, sym in enumerate(["CASH"] + assets, start=1):
         # 티커+이름 표시
         name = ticker_names.get(sym, sym)
-        display_name = f"{sym}({name})" if name != sym and name != "현금" else sym
+        display_name = f"{name}({sym})" if name != sym else sym
 
         if sym == "CASH":
             pnl_usd = 0.0
