@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from config import MARKET_SCHEDULES
 from logic.backtest.runner import run_backtest
 from logic.backtest.settings import load_settings
-from utils.slack import send_slack_auto_trigger_debug, send_slack_recommendation
+from utils.slack import send_slack_recommendation
 
 AUTO_TRIGGER_SLOTS = {
     "kor": (("open_30m", time(9, 30)), ("close_30m", time(15, 0))),
@@ -137,6 +137,18 @@ def save_current_state(country: str, state: dict) -> None:
         json.dump(state, f, indent=4, ensure_ascii=False)
 
 
+def _format_metric_pct(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value * 100:+.2f}%"
+
+
+def _format_asset_price(value: float | None, prefix: str, suffix: str, fmt: str) -> str:
+    if value is None:
+        return "-"
+    return f"{prefix}{format(value, fmt)}{suffix}"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="추천 실행 엔트리 포인트")
     parser.add_argument("country", nargs="?", default="us", help="대상 국가 (us/kor)")
@@ -160,18 +172,6 @@ def main() -> None:
     )
 
     auto_slot = get_auto_trigger_slot(country) if args.auto else None
-    nearest_trigger_label = get_nearest_auto_trigger_label(country) if args.auto else "N/A"
-
-    if args.auto and args.slack:
-        initial_outcome = "목표 슬롯 감지" if auto_slot is not None else "목표 슬롯 밖이라 스킵 예정"
-        send_slack_auto_trigger_debug(
-            country=country,
-            now_local=now_local,
-            target_label=nearest_trigger_label,
-            outcome=initial_outcome,
-            market_status=status,
-        )
-
     # 자동 실행 모드에서는 목표 시각이 아닐 때 스킵
     if args.auto and auto_slot is None:
         trigger_labels = ", ".join(t.strftime("%H:%M") for _, t in AUTO_TRIGGER_SLOTS.get(country, ()))
@@ -224,6 +224,10 @@ def main() -> None:
         current_state = {
             "date": end_date,
             "target": last_target,
+            "target_name": settings.get(
+                "offense_name" if last_target == settings["offense_ticker"] else "defense_name",
+                last_target,
+            ),
             "updated_at": datetime.now().isoformat(),
         }
         save_current_state(country, current_state)
@@ -266,6 +270,8 @@ def main() -> None:
         offense_ticker: offense_name,
         defense_ticker: defense_name,
     }
+    if display_target and display_target not in ticker_names:
+        ticker_names[display_target] = prev_state.get("target_name", display_target)
 
     # 경고 모드에서 전환 전 보유 데이터 추출
     pre_switch_data = result.get("pre_switch_data", {})
@@ -274,14 +280,21 @@ def main() -> None:
 
     # 추천 출력 생성
     table_lines = []
-    assets = [offense_ticker, defense_ticker]
+    assets = []
+    if display_target and display_target not in (offense_ticker, defense_ticker):
+        assets.append(display_target)
+    for sym in [offense_ticker, defense_ticker]:
+        if sym not in assets:
+            assets.append(sym)
+
     for sym in assets:
         name = ticker_names.get(sym, sym)
         display_name = f"{sym}({name})" if name != sym else sym
 
-        price = last_prices.get(sym, 0.0)
-        day_ret = daily_returns.get(sym, 0.0)
-        c_ret = cum_returns.get(sym, 0.0)
+        has_market_data = sym in last_prices
+        price = last_prices.get(sym)
+        day_ret = daily_returns.get(sym) if has_market_data else None
+        c_ret = cum_returns.get(sym) if has_market_data else None
 
         # 경고 모드에서 현재 보유 종목의 누적 수익률은 전환 전 데이터 사용
         if is_warning and warning_target and sym == display_target:
@@ -315,10 +328,10 @@ def main() -> None:
 
         table_lines.append(f"{status_emoji} {display_name}")
         table_lines.append(f"  상태: {status_text}")
-        table_lines.append(f"  일간: {day_ret * 100:+.2f}%")
+        table_lines.append(f"  일간: {_format_metric_pct(day_ret)}")
 
         # 누적 수익률 뒤에 보유 정보 추가
-        cum_text = f"  누적: {c_ret * 100:+.2f}%"
+        cum_text = f"  누적: {_format_metric_pct(c_ret)}"
         if sym == display_target:
             # 경고 모드에서는 전환 전 보유일 사용
             if is_warning and warning_target:
@@ -331,7 +344,7 @@ def main() -> None:
             cum_text += "(미보유)"
         table_lines.append(cum_text)
 
-        table_lines.append(f"  현재가: {currency_prefix}{format(price, price_fmt)}{currency_suffix}")
+        table_lines.append(f"  현재가: {_format_asset_price(price, currency_prefix, currency_suffix, price_fmt)}")
         if note:
             table_lines.append(f"  비고: {note}")
         table_lines.append("")
