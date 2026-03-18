@@ -30,48 +30,6 @@ def _get_slack_client() -> tuple[object | None, str | None]:
     return WebClient(token=token), channel_id
 
 
-def send_slack_auto_trigger_debug(
-    country: str,
-    now_local: str,
-    target_label: str,
-    outcome: str,
-    market_status: str,
-) -> bool:
-    """자동 실행 트리거 진단 메시지를 Slack으로 전송합니다."""
-    client, channel_id = _get_slack_client()
-    if client is None or channel_id is None:
-        return False
-
-    market_name = "🇺🇸 미국" if country.lower() == "us" else "🇰🇷 한국"
-    text = (
-        f"{market_name} 자동 트리거 테스트\n"
-        f"• 목표 시각: {target_label}\n"
-        f"• 실행 시각: {now_local}\n"
-        f"• 시장 상태: {market_status}\n"
-        f"• 처리 결과: {outcome}"
-    )
-
-    try:
-        client.chat_postMessage(
-            channel=channel_id,
-            text=f"[{market_name}] 자동 트리거 테스트 - {target_label} ({outcome})",
-            blocks=[
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": text,
-                    },
-                }
-            ],
-        )
-        print(f" [SLACK] 자동 트리거 테스트 메시지 전송 완료 (channel={channel_id})")
-        return True
-    except Exception as e:
-        print(f" [SLACK] 자동 트리거 테스트 메시지 전송 실패: {e}")
-        return False
-
-
 def send_slack_recommendation(
     country: str,
     as_of: str,
