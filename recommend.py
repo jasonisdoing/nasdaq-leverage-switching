@@ -15,7 +15,6 @@ AUTO_TRIGGER_SLOTS = {
     "us": (("open_30m", time(10, 0)), ("close_30m", time(15, 30))),
 }
 AUTO_TRIGGER_TOLERANCE_MINUTES = 45
-FINAL_SYNC_SLOT = "final_close"
 
 
 def get_market_status(country: str) -> str:
@@ -198,25 +197,16 @@ def main() -> None:
         f"[{country.upper()}] 실행 시작 "
         f"(현지시각: {now_local}, market_status: {status}, auto={args.auto}, slack={args.slack})"
     )
-
-    auto_slot = None
-    if args.auto:
-        if status == "CLOSED_JUST_NOW":
-            auto_slot = FINAL_SYNC_SLOT
-        else:
-            auto_slot = get_auto_trigger_slot(country)
+    auto_slot = get_auto_trigger_slot(country) if args.auto else None
     auto_debug = os.environ.get("AUTO_TRIGGER_DEBUG", "").lower() == "true"
     nearest_trigger_label = get_nearest_auto_trigger_label(country) if args.auto else "N/A"
 
     if args.auto and args.slack and auto_debug:
-        if auto_slot == FINAL_SYNC_SLOT:
-            initial_outcome = "장마감 후 확정 슬롯 감지"
-        else:
-            initial_outcome = "목표 슬롯 감지" if auto_slot is not None else "목표 슬롯 밖이라 스킵 예정"
+        initial_outcome = "목표 슬롯 감지" if auto_slot is not None else "목표 슬롯 밖이라 스킵 예정"
         send_slack_auto_trigger_debug(
             country=country,
             now_local=now_local,
-            target_label=("장마감 후 확정" if auto_slot == FINAL_SYNC_SLOT else nearest_trigger_label),
+            target_label=nearest_trigger_label,
             outcome=initial_outcome,
             market_status=status,
         )
@@ -464,15 +454,15 @@ def main() -> None:
             is_warning=is_warning,
             warning_target_display=warning_target_display,
         )
-        if args.auto and auto_slot is not None:
-            save_auto_alert_state(
-                country,
-                {
-                    "date": today_local,
-                    "slot": auto_slot,
-                    "sent_at": datetime.now().isoformat(),
-                },
-            )
+    if args.auto and auto_slot is not None:
+        save_auto_alert_state(
+            country,
+            {
+                "date": today_local,
+                "slot": auto_slot,
+                "sent_at": datetime.now().isoformat(),
+            },
+        )
 
 
 if __name__ == "__main__":
