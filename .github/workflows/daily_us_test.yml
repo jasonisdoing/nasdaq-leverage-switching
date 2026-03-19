@@ -1,4 +1,4 @@
-name: Daily Index Switching (US)
+name: Daily (US)
 
 on:
   schedule:
