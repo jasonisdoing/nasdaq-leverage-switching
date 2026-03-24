@@ -1,20 +1,13 @@
 import argparse
 import json
-import os
-from datetime import datetime, time
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from config import MARKET_SCHEDULES
 from logic.backtest.runner import run_backtest
 from logic.backtest.settings import load_settings
-from utils.slack import send_slack_auto_trigger_debug, send_slack_recommendation
-
-AUTO_TRIGGER_SLOTS = {
-    "kor": (("open_30m", time(9, 30)), ("close_30m", time(15, 0))),
-    "us": (("open_30m", time(10, 0)), ("close_30m", time(15, 30))),
-}
-AUTO_TRIGGER_TOLERANCE_MINUTES = 45
+from utils.slack import send_slack_recommendation
 
 
 def get_market_status(country: str) -> str:
@@ -47,74 +40,6 @@ def get_market_status(country: str) -> str:
         return "CLOSED_JUST_NOW"
 
     return "CLOSED"
-
-
-def get_auto_trigger_slot(country: str) -> str | None:
-    """자동 실행 시 현지 장 기준 목표 슬롯인지 확인합니다."""
-    schedule = MARKET_SCHEDULES.get(country)
-    if not schedule:
-        return "default"
-
-    trigger_slots = AUTO_TRIGGER_SLOTS.get(country)
-    if not trigger_slots:
-        return "default"
-
-    tz = ZoneInfo(schedule["timezone"])
-    now = datetime.now(tz)
-    now_minutes = now.hour * 60 + now.minute
-    matched_slot = None
-    matched_diff = None
-
-    for slot_name, trigger in trigger_slots:
-        trigger_minutes = trigger.hour * 60 + trigger.minute
-        diff = abs(now_minutes - trigger_minutes)
-        if diff <= AUTO_TRIGGER_TOLERANCE_MINUTES and (matched_diff is None or diff < matched_diff):
-            matched_slot = slot_name
-            matched_diff = diff
-    return matched_slot
-
-
-def get_nearest_auto_trigger_label(country: str) -> str:
-    """현재 시각 기준 가장 가까운 목표 슬롯 라벨을 반환합니다."""
-    schedule = MARKET_SCHEDULES.get(country)
-    trigger_slots = AUTO_TRIGGER_SLOTS.get(country, ())
-    if not schedule or not trigger_slots:
-        return "N/A"
-
-    tz = ZoneInfo(schedule["timezone"])
-    now = datetime.now(tz)
-    now_minutes = now.hour * 60 + now.minute
-    nearest_label = "N/A"
-    nearest_diff = None
-
-    for _, trigger in trigger_slots:
-        trigger_minutes = trigger.hour * 60 + trigger.minute
-        diff = abs(now_minutes - trigger_minutes)
-        if nearest_diff is None or diff < nearest_diff:
-            nearest_diff = diff
-            nearest_label = trigger.strftime("%H:%M")
-    return nearest_label
-
-
-def load_auto_alert_state(country: str) -> dict:
-    """저장된 자동 알림 상태를 로드합니다."""
-    state_path = Path(f"state/last_auto_alert_{country}.json")
-    if not state_path.exists():
-        return {}
-    try:
-        with state_path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def save_auto_alert_state(country: str, state: dict) -> None:
-    """자동 알림 상태를 저장합니다."""
-    state_dir = Path("state")
-    state_dir.mkdir(exist_ok=True)
-    state_path = state_dir / f"last_auto_alert_{country}.json"
-    with state_path.open("w", encoding="utf-8") as f:
-        json.dump(state, f, indent=4, ensure_ascii=False)
 
 
 def load_previous_state(country: str) -> dict:
@@ -180,7 +105,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="추천 실행 엔트리 포인트")
     parser.add_argument("country", nargs="?", default="us", help="대상 국가 (us/kor)")
     parser.add_argument("--slack", action="store_true", help="결과를 Slack으로 전송")
-    parser.add_argument("--auto", action="store_true", help="자동 실행 모드 (장 운영 시간 체크 수행)")
     args = parser.parse_args()
 
     country = args.country
@@ -190,47 +114,9 @@ def main() -> None:
     tz_name = schedule.get("timezone", "UTC")
     now_dt_local = datetime.now(ZoneInfo(tz_name))
     now_local = now_dt_local.strftime("%Y-%m-%d %H:%M %Z")
-    today_local = now_dt_local.date().isoformat()
     status = get_market_status(country)
     is_warning = status == "OPEN"
-    print(
-        f"[{country.upper()}] 실행 시작 "
-        f"(현지시각: {now_local}, market_status: {status}, auto={args.auto}, slack={args.slack})"
-    )
-    auto_slot = get_auto_trigger_slot(country) if args.auto else None
-    auto_debug = os.environ.get("AUTO_TRIGGER_DEBUG", "").lower() == "true"
-    nearest_trigger_label = get_nearest_auto_trigger_label(country) if args.auto else "N/A"
-
-    if args.auto and args.slack and auto_debug:
-        initial_outcome = "목표 슬롯 감지" if auto_slot is not None else "목표 슬롯 밖이라 스킵 예정"
-        send_slack_auto_trigger_debug(
-            country=country,
-            now_local=now_local,
-            target_label=nearest_trigger_label,
-            outcome=initial_outcome,
-            market_status=status,
-        )
-
-    # 자동 실행 모드에서는 목표 시각이 아닐 때 스킵
-    if args.auto and auto_slot is None:
-        trigger_labels = ", ".join(t.strftime("%H:%M") for _, t in AUTO_TRIGGER_SLOTS.get(country, ()))
-        print(
-            f"[{country.upper()}] 자동 실행 목표 시각이 아닙니다. "
-            f"(현재 현지시각: {now_local}, 목표: {trigger_labels}, 허용오차: ±{AUTO_TRIGGER_TOLERANCE_MINUTES}분)"
-        )
-        return
-
-    # 자동 실행 모드에서는 같은 날짜/슬롯 중복 전송 방지
-    if args.auto and auto_slot is not None:
-        auto_state = load_auto_alert_state(country)
-        if auto_state.get("date") == today_local and auto_state.get("slot") == auto_slot:
-            print(f"[{country.upper()}] 자동 알림은 이미 전송되었습니다. (date={today_local}, slot={auto_slot})")
-            return
-
-    # 자동 실행 모드(크론)에서만 장 외 시간 스킵
-    if args.auto and status == "CLOSED":
-        print(f"[{country.upper()}] 장 운영 시간이 아니거나 마감 직후가 아닙니다. 실행을 건너뜁니다.")
-        return
+    print(f"[{country.upper()}] 실행 시작 (현지시각: {now_local}, market_status: {status}, slack={args.slack})")
 
     config_path = Path(f"config/{country}.json")
 
@@ -453,15 +339,6 @@ def main() -> None:
             holding_days=result.get("holding_days", 0),
             is_warning=is_warning,
             warning_target_display=warning_target_display,
-        )
-    if args.auto and auto_slot is not None:
-        save_auto_alert_state(
-            country,
-            {
-                "date": today_local,
-                "slot": auto_slot,
-                "sent_at": datetime.now().isoformat(),
-            },
         )
 
 
