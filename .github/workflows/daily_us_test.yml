@@ -2,11 +2,11 @@ name: Daily (US)
 
 on:
   schedule:
-    # 미국 장 기준 30분 후/30분 전
-    # 서머타임: 10:00 ET = 14:00 UTC, 15:30 ET = 19:30 UTC
-    # 비서머타임: 10:00 ET = 15:00 UTC, 15:30 ET = 20:30 UTC
-    # GitHub schedule 지연에 대비해 미국 장 시간대 주변을 10분마다 실행
-    - cron: '*/10 13-21 * * 1-5'
+    # 미국 운영 기준 2회 발사
+    # 현재 서머타임 기준 오전 09:00 ET = 13:00 UTC
+    # 현재 서머타임 기준 오후 14:30 ET = 18:30 UTC
+    - cron: '0 13 * * 1-5'
+    - cron: '30 18 * * 1-5'
   workflow_dispatch: # 수동 실행 활성화
 
 env:
@@ -39,7 +39,7 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           TARGET_CHANNEL_ID: ${{ secrets.TARGET_CHANNEL_ID }}
-        run: python recommend.py us --slack --auto
+        run: python recommend.py us --slack
 
       - name: Commit and Push updated config
         run: |
@@ -47,6 +47,5 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git add config/us.json
           git add state/last_recommendation_us.json || true
-          git add state/last_auto_alert_us.json || true
           git status
           git diff --quiet && git diff --staged --quiet || (git commit -m "chore(us): update optimal parameters [skip ci]" && git pull --rebase origin main && git push)
