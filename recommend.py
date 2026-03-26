@@ -115,7 +115,11 @@ def main() -> None:
     now_dt_local = datetime.now(ZoneInfo(tz_name))
     now_local = now_dt_local.strftime("%Y-%m-%d %H:%M %Z")
     status = get_market_status(country)
-    is_warning = status == "OPEN"
+    # 한국의 경우 장 마감 직후(1시간 15분 이내)에도 '장중' 스타일(경고)로 보고하길 원함
+    if country == "kor" and status == "CLOSED_JUST_NOW":
+        is_warning = True
+    else:
+        is_warning = status == "OPEN"
     print(f"[{country.upper()}] 실행 시작 (현지시각: {now_local}, market_status: {status}, slack={args.slack})")
 
     config_path = Path(f"config/{country}.json")
@@ -144,8 +148,8 @@ def main() -> None:
     prev_target = prev_state.get("target")
     is_changed = (prev_target is not None) and (prev_target != last_target)
 
-    # 경고 모드에서는 상태를 저장하지 않음 (장 마감 후 확정 시에만 저장)
-    if not is_warning:
+    # 상태 저장: 장이 닫혔거나 막 닫혔을 경우에만 저장 (is_warning과 분리하여 확정 상태 기록)
+    if status in ["CLOSED", "CLOSED_JUST_NOW"]:
         current_state = {
             "date": end_date,
             "target": last_target,

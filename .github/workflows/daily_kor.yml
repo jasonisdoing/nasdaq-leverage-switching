@@ -3,9 +3,9 @@ name: Daily (KOR)
 on:
   schedule:
     # 한국 운영 기준 2회 발사
-    # 오전 08:00 KST = 전일 23:00 UTC (일~목 UTC)
+    # 오전 09:00 KST = 00:00 UTC (월~금 UTC)
     # 오후 14:30 KST = 05:30 UTC (월~금 UTC)
-    - cron: '0 23 * * 0-4'
+    - cron: '0 0 * * 1-5'
     - cron: '30 5 * * 1-5'
   workflow_dispatch: # 수동 실행 활성화
 
