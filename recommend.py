@@ -11,7 +11,16 @@ from utils.slack import send_slack_recommendation
 
 
 def get_market_status(country: str) -> str:
-    """현재 시간이 해당 국가의 장중인지, 방금 마감했는지, 아니면 닫혀있는지 확인합니다."""
+    """현재 시간 기준 장 상태를 반환합니다.
+
+    반환값:
+        "OPEN"            - 장중
+        "CLOSED_JUST_NOW" - 장 마감 후 75분 이내
+        "PRE_OPEN"        - 당일 장 시작 전
+        "CLOSED"          - 장 마감 후 75분 초과 (전날 마감 이후 ~ 당일 개장 전 아닌 경우 포함)
+    """
+    from datetime import timedelta
+
     schedule = MARKET_SCHEDULES.get(country)
     if not schedule:
         return "OPEN"
@@ -30,16 +39,26 @@ def get_market_status(country: str) -> str:
     if open_time <= current_time <= close_time:
         return "OPEN"
 
-    # 장 마감 후 1시간 15분 이내인지 확인 (CLOSED_JUST_NOW)
-    from datetime import timedelta
-
+    # 장 마감 후 75분 이내
     close_dt = datetime.combine(now.date(), close_time, tzinfo=tz)
     time_since_close = now - close_dt
-
     if timedelta(0) <= time_since_close <= timedelta(minutes=75):
         return "CLOSED_JUST_NOW"
 
+    # 당일 개장 전
+    open_dt = datetime.combine(now.date(), open_time, tzinfo=tz)
+    if now < open_dt:
+        return "PRE_OPEN"
+
     return "CLOSED"
+
+
+MARKET_PHASE_LABEL = {
+    "OPEN": "장중",
+    "CLOSED_JUST_NOW": "장 마감 직후",
+    "PRE_OPEN": "장전",
+    "CLOSED": "장 마감 후",
+}
 
 
 def load_previous_state(country: str) -> dict:
@@ -109,18 +128,18 @@ def main() -> None:
 
     country = args.country
 
-    # 항상 시장 상태를 확인하여 경고/확정 모드 결정
+    # 시장 상태 확인
     schedule = MARKET_SCHEDULES.get(country, {})
     tz_name = schedule.get("timezone", "UTC")
     now_dt_local = datetime.now(ZoneInfo(tz_name))
     now_local = now_dt_local.strftime("%Y-%m-%d %H:%M %Z")
     status = get_market_status(country)
-    # 한국의 경우 장 마감 직후(1시간 15분 이내)에도 '장중' 스타일(경고)로 보고하길 원함
-    if country == "kor" and status == "CLOSED_JUST_NOW":
-        is_warning = True
-    else:
-        is_warning = status == "OPEN"
-    print(f"[{country.upper()}] 실행 시작 (현지시각: {now_local}, market_status: {status}, slack={args.slack})")
+    market_phase = MARKET_PHASE_LABEL.get(status, "장 마감 후")
+    # 장중일 때만 경고 모드 (현재 보유 기준 표시, 마감 후 변경 가능성 안내)
+    is_warning = status == "OPEN"
+    print(
+        f"[{country.upper()}] 실행 시작 (현지시각: {now_local}, status: {status} [{market_phase}], slack={args.slack})"
+    )
 
     config_path = Path(f"config/{country}.json")
 
@@ -148,8 +167,8 @@ def main() -> None:
     prev_target = prev_state.get("target")
     is_changed = (prev_target is not None) and (prev_target != last_target)
 
-    # 상태 저장: 장이 닫혔거나 막 닫혔을 경우에만 저장 (is_warning과 분리하여 확정 상태 기록)
-    if status in ["CLOSED", "CLOSED_JUST_NOW"]:
+    # 상태 저장: 장중이 아닐 때 (장전/마감 직후/마감 후 모두 포함)
+    if status != "OPEN":
         current_state = {
             "date": end_date,
             "target": last_target,
@@ -346,6 +365,7 @@ def main() -> None:
             holding_days=result.get("holding_days", 0),
             is_warning=is_warning,
             warning_target_display=warning_target_display,
+            market_phase=market_phase,
         )
 
 
