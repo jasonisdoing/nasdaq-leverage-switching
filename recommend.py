@@ -246,6 +246,9 @@ def main() -> None:
             if display_target == offense_ticker:
                 # 공격 자산 보유 중: 얼마나 더 하락하면 매도하는지 표시
                 note = f"{signal_name}가 {needed_drop:.2f}% 더 하락 시 매도"
+            elif warning_target == offense_ticker:
+                # 이미 매수 신호 발생 (장중 경고 모드) - 장 마감 후 전환 예정
+                note = f"{signal_name} 매수 조건 이미 충족 → 장 마감 후 매수 전환 예정"
             else:
                 # 방어 자산 보유 중: 공격 자산이 얼마나 회복해야 매수하는지 표시
                 note = f"{signal_name}가 {needed_recovery:+.2f}% 더 회복 시 매수"
