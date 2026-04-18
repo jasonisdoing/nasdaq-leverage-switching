@@ -1,9 +1,9 @@
-name: Deploy
+name: Deploy to Oracle VM
 
 on:
   push:
     branches:
-      - upgrade   # upgrade 브랜치에 push 시 자동 배포
+      - upgrade   # upgrade 브랜치 푸시 시 자동 배포
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -15,6 +15,40 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Deploy to Oracle VM
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.ORACLE_VM_HOST }}
+          username: ${{ secrets.ORACLE_VM_USERNAME }}
+          key: ${{ secrets.ORACLE_VM_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            echo ">>> Connecting to Oracle VM and starting deployment..."
+            APP_DIR=~/apps/leverage-switching
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
+            # 코드 동기화
+            if [ ! -d .git ]; then
+              git clone https://github.com/jasonisdoing/leverage-switching.git .
+              git checkout upgrade
+            else
+              git fetch origin upgrade
+              git reset --hard origin/upgrade
+            fi
+
+            # venv 준비 (없으면 생성) 및 의존성 설치
+            if [ ! -d .venv ]; then
+              python3 -m venv .venv
+            fi
+            ./.venv/bin/pip install --upgrade pip
+            ./.venv/bin/pip install -r requirements.txt
+
+            # 로그 디렉토리 (cron 에서도 매번 mkdir 하지만 안전)
+            mkdir -p logs/cron state
+
+            echo ">>> Oracle VM deployment completed."
+
       - name: Extract APP_VERSION
         id: app_version
         run: |
@@ -25,16 +59,32 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Notify Slack (Success)
+      - name: Collect Oracle VM disk usage
+        if: ${{ always() }}
+        id: disk_usage
+        env:
+          ORACLE_VM_HOST: ${{ secrets.ORACLE_VM_HOST }}
+          ORACLE_VM_USERNAME: ${{ secrets.ORACLE_VM_USERNAME }}
+          ORACLE_VM_SSH_KEY: ${{ secrets.ORACLE_VM_SSH_KEY }}
+        run: |
+          KEY_PATH="$RUNNER_TEMP/oracle_vm_key"
+          printf '%s\n' "$ORACLE_VM_SSH_KEY" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          DISK_FREE=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$ORACLE_VM_USERNAME@$ORACLE_VM_HOST" "df -h / | awk 'NR==2 {print \$4}'" || true)
+          DISK_USE=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$ORACLE_VM_USERNAME@$ORACLE_VM_HOST" "df -h / | awk 'NR==2 {print \$5}'" || true)
+          echo "disk_free=${DISK_FREE:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "disk_use=${DISK_USE:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Slack (deploy succeeded)
         if: ${{ success() }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"✅ leverage-switching 업데이트 완료 (branch: upgrade)\\nAPP_VERSION: ${{ steps.app_version.outputs.version }}\"}" \
+            --data "{\"text\":\"✅ Oracle VM (leverage-switching) 배포 완료 (branch: upgrade)\nAPP_VERSION: ${{ steps.app_version.outputs.version }}\nDISK_FREE: ${{ steps.disk_usage.outputs.disk_free }}\nDISK_USE: ${{ steps.disk_usage.outputs.disk_use }}\"}" \
             ${{ secrets.LOGS_SLACK_WEBHOOK }}
 
-      - name: Notify Slack (Failure)
+      - name: Notify Slack (deploy failed)
         if: ${{ failure() }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"❌ leverage-switching 업데이트 실패 (branch: upgrade)\\nRepo: ${{ github.repository }}\\nCommit: ${{ github.sha }}\"}" \
+            --data "{\"text\":\"❌ Oracle VM (leverage-switching) 배포 실패 (branch: upgrade)\nRepo: ${{ github.repository }}\nCommit: ${{ github.sha }}\nDISK_FREE: ${{ steps.disk_usage.outputs.disk_free }}\nDISK_USE: ${{ steps.disk_usage.outputs.disk_use }}\"}" \
             ${{ secrets.LOGS_SLACK_WEBHOOK }}

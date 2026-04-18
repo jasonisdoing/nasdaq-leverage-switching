@@ -1,0 +1,33 @@
+# leverage-switching VM 배치 스케줄 (타임존: Asia/Seoul)
+#
+# 설치 (다른 앱의 crontab 을 보존하면서 병합):
+#   bash /home/ubuntu/apps/leverage-switching/infra/cron/install.sh
+#
+# ⚠️ `crontab <파일>` 은 사용자 crontab 전체를 덮어쓰므로 직접 사용 금지.
+#    반드시 install.sh 를 통해 마커 기반으로 병합해야 다른 앱(momentum-etf 등)
+#    의 크론이 유지됩니다. 반복 실행해도 leverage-switching 블록만 교체됩니다.
+#
+# 제거:
+#   bash /home/ubuntu/apps/leverage-switching/infra/cron/install.sh --uninstall
+#
+# 확인:
+#   crontab -l
+#
+# 동작:
+#   호스트 cron 이 venv 파이썬으로 infra/cron/run_batch.py 를 호출합니다.
+#   래퍼가 실제 스크립트를 실행하고 성공/실패 결과를 LOGS_SLACK_WEBHOOK 으로 전송.
+#
+# 로그:
+#   logs/cron/leverage_kor.log, logs/cron/leverage_us.log 에 append
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+APP_DIR=/home/ubuntu/apps/leverage-switching
+APP_TYPE=leverage-switching
+
+# 4시간마다 (KST 00, 04, 08, 12, 16, 20) - 한국 시장
+# 코드가 실행 시점의 장 상태(장전/장중/장 마감 직후/장 마감 후)를 자동 판단
+0 */4 * * * cd $APP_DIR && mkdir -p logs/cron && $APP_DIR/.venv/bin/python infra/cron/run_batch.py leverage_kor $APP_DIR/.venv/bin/python recommend.py kor --slack >> logs/cron/leverage_kor.log 2>&1
+
+# 4시간마다 (KST 00, 04, 08, 12, 16, 20) - 미국 시장
+0 */4 * * * cd $APP_DIR && mkdir -p logs/cron && $APP_DIR/.venv/bin/python infra/cron/run_batch.py leverage_us $APP_DIR/.venv/bin/python recommend.py us --slack >> logs/cron/leverage_us.log 2>&1
