@@ -16,46 +16,69 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Deploy to Oracle VM
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.ORACLE_VM_HOST }}
-          username: ${{ secrets.ORACLE_VM_USERNAME }}
-          key: ${{ secrets.ORACLE_VM_SSH_KEY }}
-          script: |
-            set -euo pipefail
-            echo ">>> Connecting to Oracle VM and starting deployment..."
-            APP_DIR=~/apps/leverage-switching
-            mkdir -p "$APP_DIR"
-            cd "$APP_DIR"
+        id: deploy
+        continue-on-error: true
+        env:
+          ORACLE_VM_HOST: ${{ secrets.ORACLE_VM_HOST }}
+          ORACLE_VM_USERNAME: ${{ secrets.ORACLE_VM_USERNAME }}
+          ORACLE_VM_SSH_KEY: ${{ secrets.ORACLE_VM_SSH_KEY }}
+        run: |
+          KEY_PATH="$RUNNER_TEMP/oracle_vm_key"
+          printf '%s\n' "$ORACLE_VM_SSH_KEY" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          LOG="$RUNNER_TEMP/deploy.log"
 
-            # 코드 동기화
-            if [ ! -d .git ]; then
-              git clone https://github.com/jasonisdoing/leverage-switching.git .
-              git checkout upgrade
-            else
-              git fetch origin upgrade
-              git reset --hard origin/upgrade
-            fi
+          set +e
+          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no \
+            "$ORACLE_VM_USERNAME@$ORACLE_VM_HOST" 'bash -s' <<'EOSSH' 2>&1 | tee "$LOG"
+          set -euo pipefail
+          echo ">>> Connecting to Oracle VM and starting deployment..."
+          APP_DIR=~/apps/leverage-switching
+          mkdir -p "$APP_DIR"
+          cd "$APP_DIR"
 
-            # venv 준비 (없으면 생성) 및 의존성 설치
-            if [ ! -d .venv ]; then
-              python3 -m venv .venv
-            fi
-            ./.venv/bin/pip install --upgrade pip
-            ./.venv/bin/pip install -r requirements.txt
+          # 코드 동기화
+          # .git 이 없으면 기존 파일(.env 등)을 보존한 채 git 저장소로 초기화
+          if [ ! -d .git ]; then
+            git init -q -b upgrade
+            git remote add origin https://github.com/jasonisdoing/leverage-switching.git 2>/dev/null \
+              || git remote set-url origin https://github.com/jasonisdoing/leverage-switching.git
+          fi
+          git fetch origin upgrade
+          git reset --hard origin/upgrade
 
-            # 로그 디렉토리 (cron 에서도 매번 mkdir 하지만 안전)
-            mkdir -p logs/cron state
+          # venv 준비 (없으면 생성) 및 의존성 설치
+          if [ ! -d .venv ]; then
+            python3 -m venv .venv
+          fi
+          ./.venv/bin/pip install --upgrade pip
+          ./.venv/bin/pip install -r requirements.txt
 
-            echo ">>> Oracle VM deployment completed."
+          # 로그/state 디렉토리
+          mkdir -p logs/cron state
+
+          echo ">>> Oracle VM deployment completed."
+          EOSSH
+          STATUS=${PIPESTATUS[0]}
+          set -e
+
+          # 실패 로그 말미를 tail 로 추출해 다음 스텝에서 Slack 메시지에 포함
+          {
+            echo "deploy_status=$STATUS"
+            echo "deploy_tail<<DEPLOY_TAIL_EOF"
+            tail -n 25 "$LOG" || true
+            echo "DEPLOY_TAIL_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          exit $STATUS
 
       - name: Extract APP_VERSION
         id: app_version
+        if: ${{ always() }}
         run: |
           VERSION=$(python -c "from pathlib import Path; import re; content = Path('utils/logger.py').read_text(encoding='utf-8'); match = re.search(r'APP_VERSION\s*=\s*[\'\"]([^\'\"]+)[\'\"]', content); print(match.group(1) if match else '')")
           if [ -z "$VERSION" ]; then
-            echo 'APP_VERSION not found' >&2
-            exit 1
+            VERSION="unknown"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -76,15 +99,49 @@ jobs:
           echo "disk_use=${DISK_USE:-unknown}" >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack (deploy succeeded)
-        if: ${{ success() }}
+        if: ${{ steps.deploy.outputs.deploy_status == '0' }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
             --data "{\"text\":\"✅ Oracle VM (leverage-switching) 배포 완료 (branch: upgrade)\nAPP_VERSION: ${{ steps.app_version.outputs.version }}\nDISK_FREE: ${{ steps.disk_usage.outputs.disk_free }}\nDISK_USE: ${{ steps.disk_usage.outputs.disk_use }}\"}" \
             ${{ secrets.LOGS_SLACK_WEBHOOK }}
 
       - name: Notify Slack (deploy failed)
-        if: ${{ failure() }}
+        if: ${{ steps.deploy.outputs.deploy_status != '0' }}
+        env:
+          DEPLOY_TAIL: ${{ steps.deploy.outputs.deploy_tail }}
+          SLACK_WEBHOOK: ${{ secrets.LOGS_SLACK_WEBHOOK }}
+          APP_VERSION: ${{ steps.app_version.outputs.version }}
+          DISK_FREE: ${{ steps.disk_usage.outputs.disk_free }}
+          DISK_USE: ${{ steps.disk_usage.outputs.disk_use }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+          REPO: ${{ github.repository }}
         run: |
-          curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"❌ Oracle VM (leverage-switching) 배포 실패 (branch: upgrade)\nRepo: ${{ github.repository }}\nCommit: ${{ github.sha }}\nDISK_FREE: ${{ steps.disk_usage.outputs.disk_free }}\nDISK_USE: ${{ steps.disk_usage.outputs.disk_use }}\"}" \
-            ${{ secrets.LOGS_SLACK_WEBHOOK }}
+          # 실패 로그 안전하게 JSON 문자열로 인코딩 (python 사용)
+          MESSAGE=$(python3 - <<'PY'
+          import json, os
+          tail = os.environ.get("DEPLOY_TAIL", "").strip()
+          if len(tail) > 2500:
+              tail = tail[-2500:]
+          text = (
+              "❌ Oracle VM (leverage-switching) 배포 실패 (branch: upgrade)\n"
+              f"Repo: {os.environ.get('REPO')}\n"
+              f"Commit: {os.environ.get('COMMIT')}\n"
+              f"APP_VERSION: {os.environ.get('APP_VERSION')}\n"
+              f"DISK_FREE: {os.environ.get('DISK_FREE')}\n"
+              f"DISK_USE: {os.environ.get('DISK_USE')}\n"
+              f"Run: {os.environ.get('RUN_URL')}\n"
+              "```\n"
+              f"{tail or '(no log captured)'}\n"
+              "```"
+          )
+          print(json.dumps({"text": text}))
+          PY
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$MESSAGE" "$SLACK_WEBHOOK"
+
+      - name: Fail job if deploy failed
+        if: ${{ steps.deploy.outputs.deploy_status != '0' }}
+        run: |
+          echo "Deploy step exited with status ${{ steps.deploy.outputs.deploy_status }}"
+          exit 1
