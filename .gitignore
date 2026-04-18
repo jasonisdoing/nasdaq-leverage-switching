@@ -12,3 +12,9 @@ znotes/
 
 # 백테스트 결과
 zresults
+
+# state: VM 로컬에만 유지 (git reset --hard 로부터 보호)
+state/*.json
+
+# cron 로그
+logs/
