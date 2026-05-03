@@ -1,7 +1,7 @@
 {
-    "backtested_date": "2026-03-10",
+    "backtested_date": "2026-05-04",
     "market": "us",
-    "start_date": "2025-05-01",
+    "months_range": 12,
     "signal": {
         "ticker": "QQQ",
         "name": "Nasdaq 100"
@@ -15,8 +15,8 @@
         "name": "현금"
     },
     "slippage": 0.25,
-    "drawdown_buy_cutoff": 0.2,
-    "drawdown_sell_cutoff": 0.5,
+    "drawdown_buy_cutoff": 3.3,
+    "drawdown_sell_cutoff": 3.4,
     "benchmarks": [
         {
             "ticker": "SPMO",
