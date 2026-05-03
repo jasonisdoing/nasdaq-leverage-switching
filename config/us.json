@@ -15,8 +15,8 @@
         "name": "현금"
     },
     "slippage": 0.25,
-    "drawdown_buy_cutoff": 3.3,
-    "drawdown_sell_cutoff": 3.4,
+    "drawdown_buy_cutoff": 9.0,
+    "drawdown_sell_cutoff": 11.0,
     "benchmarks": [
         {
             "ticker": "SPMO",

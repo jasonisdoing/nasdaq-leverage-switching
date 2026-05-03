@@ -13,8 +13,8 @@ from recommend import get_market_status
 # 국가별 튜닝 설정
 TUNING_CONFIG: dict[str, dict] = {
     "us": {
-        "drawdown_buy_cutoff": np.arange(0.1, 10.1, 0.1),
-        "drawdown_sell_cutoff": np.arange(0.1, 10.1, 0.1),
+        "drawdown_buy_cutoff": np.arange(0.5, 20.5, 0.5),
+        "drawdown_sell_cutoff": np.arange(0.5, 20.5, 0.5),
         "defense": [
             {"ticker": "CASH", "name": "현금"},
             # {"ticker": "SCHD", "name": "슈왑 미국 배당주 ETF"},
@@ -28,8 +28,8 @@ TUNING_CONFIG: dict[str, dict] = {
         ],
     },
     "kor": {
-        "drawdown_buy_cutoff": np.arange(0.1, 10.1, 0.1),
-        "drawdown_sell_cutoff": np.arange(0.1, 10.1, 0.1),
+        "drawdown_buy_cutoff": np.arange(0.5, 20.5, 0.5),
+        "drawdown_sell_cutoff": np.arange(0.5, 20.5, 0.5),
         "defense": [
             {"ticker": "CASH", "name": "현금"},
             # {"ticker": "161510", "name": "PLUS 고배당주"},
