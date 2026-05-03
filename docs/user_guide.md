@@ -117,15 +117,30 @@ DD -2.94% (매수컷 -0.30%, 필요 +2.64%)
 | `drawdown_buy_cutoff` | 매수 전환 기준 (%) |
 | `drawdown_sell_cutoff` | 매도 전환 기준 (%) |
 
-## 5. GitHub Actions 자동화
-매일 정해진 스케줄에 따라 서버에서 자동으로 실행되도록 설정되어 있습니다.
+## 5. Oracle VM cron 자동화
+실제 추천 배치는 GitHub Actions 가 아닌 Oracle VM 의 호스트 cron 에서 돌아갑니다. `upgrade` 브랜치에 푸시하면 `deploy.yml` 이 VM 으로 SSH 배포한 뒤 `infra/cron/install.sh` 를 실행하여 crontab 을 자동 반영합니다. 수동 재설치는 VM 에서 `bash ~/apps/leverage-switching/infra/cron/install.sh` 로 가능합니다 (idempotent).
 
-### 스케줄 (운영 기준)
-- **한국**: 오전 8:00, 오후 2:30에 추천 및 Slack 알림 실행
-- **미국**: 오전 9:00 ET, 오후 2:30 ET에 추천 및 Slack 알림 실행
+### 스케줄 (거래일 기준 = 월-금)
+- **🇰🇷 한국 (KST)**
+    - 09:30 장 시작 30분 후 (장중)
+    - 15:00 장 마감 30분 전 (장중)
+    - 16:30 장 마감 1시간 후 (장 마감 후)
+- **🇺🇸 미국 (ET, DST 자동 반영)**
+    - 10:00 ET 장 시작 30분 후 (장중)
+    - 15:30 ET 장 마감 30분 전 (장중)
+    - 17:00 ET 장 마감 1시간 후 (장 마감 후)
 
-### 필수 Secrets
-GitHub Actions 환경에서 작동하려면 Repository Secrets에 다음 항목이 등록되어야 합니다.
-- `SLACK_BOT_TOKEN`: Slack API 토큰.
+cron 은 KST 타임존으로 동작하므로 미국 시장은 매 30분 돌면서 `TZ=America/New_York date` 기준 요일(월-금)과 시각이 맞을 때만 실행합니다.
+
+### VM 에 필요한 환경
+- `~/apps/leverage-switching/.env` 에 Slack 토큰/채널 ID 설정 (아래 항목).
+- 파이썬 3 및 `python3.12-venv` (Ubuntu 22/24 의 경우 `sudo apt-get install -y python3.12-venv`).
+
+### 필수 환경 변수 (VM 의 `.env`)
+- `SLACK_BOT_TOKEN`: Slack API 토큰 (추천 결과 알림).
 - `TARGET_CHANNEL_ID`: 알림을 받을 전용 채널 ID.
-- `LOGS_SLACK_WEBHOOK`: 코드 업데이트(Deploy) 알림용 Webhook URL.
+- `LOGS_SLACK_WEBHOOK`: 배치 시작/실패 및 배포 결과 알림용 Webhook URL.
+
+### GitHub Secrets (배포용)
+- `ORACLE_VM_HOST`, `ORACLE_VM_USERNAME`, `ORACLE_VM_SSH_KEY`: VM SSH 접속 정보.
+- `LOGS_SLACK_WEBHOOK`: 배포 성공/실패 Slack 알림 Webhook.

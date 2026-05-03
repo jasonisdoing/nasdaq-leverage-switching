@@ -1,7 +1,7 @@
 {
-    "backtested_date": "2026-03-10",
+    "backtested_date": "2026-05-04",
     "market": "kor",
-    "start_date": "2025-03-01",
+    "months_range": 12,
     "signal": {
         "ticker": "226490",
         "name": "KODEX 코스피"
@@ -15,8 +15,8 @@
         "name": "현금"
     },
     "slippage": 0.5,
-    "drawdown_buy_cutoff": 1.7,
-    "drawdown_sell_cutoff": 1.8,
+    "drawdown_buy_cutoff": 7.8,
+    "drawdown_sell_cutoff": 7.9,
     "benchmarks": [
         {
             "ticker": "226490",

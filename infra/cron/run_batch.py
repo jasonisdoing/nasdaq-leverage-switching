@@ -37,6 +37,9 @@ KST = ZoneInfo("Asia/Seoul")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # .env 로드 (python-dotenv 없이도 동작하도록)
+# python-dotenv 와 동일하게 값 주위의 동일 따옴표(" 또는 ')는 벗겨낸다.
+# 따옴표가 남아 있으면 하위 프로세스(slack-sdk, urllib 등)가
+# invalid_auth / "unknown url type" 로 실패한다.
 _env_path = PROJECT_ROOT / ".env"
 if _env_path.exists():
     for _line in _env_path.read_text(encoding="utf-8").splitlines():
@@ -44,7 +47,11 @@ if _env_path.exists():
         if not _line or _line.startswith("#") or "=" not in _line:
             continue
         _k, _v = _line.split("=", 1)
-        os.environ.setdefault(_k.strip(), _v.strip())
+        _k = _k.strip()
+        _v = _v.strip()
+        if len(_v) >= 2 and _v[0] == _v[-1] and _v[0] in ('"', "'"):
+            _v = _v[1:-1]
+        os.environ.setdefault(_k, _v)
 
 MAX_TAIL_LINES = 15
 MAX_TAIL_CHARS = 1500

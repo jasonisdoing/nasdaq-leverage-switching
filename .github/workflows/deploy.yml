@@ -57,6 +57,9 @@ jobs:
           # 로그/state 디렉토리
           mkdir -p logs/cron state
 
+          # crontab 자동 반영 (마커 기반 idempotent install)
+          bash infra/cron/install.sh
+
           echo ">>> Oracle VM deployment completed."
           EOSSH
           STATUS=${PIPESTATUS[0]}
