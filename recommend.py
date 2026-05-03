@@ -354,6 +354,8 @@ def main() -> None:
             "buy_cutoff": buy_cutoff,
             "sell_cutoff": sell_cutoff,
             "cagr": result.get("cagr", 0.0),
+            "period_start": result.get("start"),
+            "period_end": result.get("end"),
         }
         send_slack_recommendation(
             country=country,

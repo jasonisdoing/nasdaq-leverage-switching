@@ -106,6 +106,20 @@ def send_slack_recommendation(
             f"• 매도 컷: {tuning_meta.get('sell_cutoff', 0):.1f}%\n"
             f"• CAGR: {tuning_meta.get('cagr', 0) * 100:.2f}%"
         )
+
+        period_start = tuning_meta.get("period_start")
+        period_end = tuning_meta.get("period_end")
+        if period_start and period_end:
+            try:
+                from datetime import date as _date
+
+                _s = _date.fromisoformat(period_start)
+                _e = _date.fromisoformat(period_end)
+                _months = max(1, int(round((_e - _s).days / 30)))
+                tuning_text += f"\n• 백테스트 기간: {period_start} ~ {period_end} ({_months} 개월)"
+            except Exception:
+                tuning_text += f"\n• 백테스트 기간: {period_start} ~ {period_end}"
+
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": tuning_text}})
         blocks.append({"type": "divider"})
 
