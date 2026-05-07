@@ -59,7 +59,10 @@ MAX_TAIL_CHARS = 1500
 LOCK_DIR = PROJECT_ROOT / "logs" / "cron"
 
 # 성공 시 알림을 생략할 job 목록 (정기 성공 알림이 과하면 추가)
-SUCCESS_NOTIFICATION_DISABLED_JOBS: set[str] = set()
+SUCCESS_NOTIFICATION_DISABLED_JOBS: set[str] = {
+    "leverage_kor",
+    "leverage_us",
+}
 
 
 def _acquire_lock(job_name: str) -> Path:
